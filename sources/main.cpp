@@ -3,15 +3,23 @@
 
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan.h>
-#include <stdio.h>
+
+#include "Base/Base.h"
+#include "Base/Log.h"
 
 
 int main(void)
 {
+    Log::Init();
+
     uint32_t numLayers = 0;
     vkEnumerateInstanceLayerProperties(&numLayers, nullptr);
 
-    printf(">%d\n", numLayers);
+    LOG_TRACE("x = {}", numLayers);
+    LOG_INFO("x = {}", numLayers);
+    LOG_WARNING("x = {}", numLayers);
+    LOG_ERROR("x = {}", 100);
+    LOG_FATAL("x = {}", 100);
 
     glfwInit();
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);

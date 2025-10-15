@@ -10,6 +10,8 @@ set(CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 set(sources
     ${SOURCE_DIR}/main.cpp
+    ${SOURCE_DIR}/Base/Debug.cpp
+    ${SOURCE_DIR}/Base/Log.cpp
 )
 
 
