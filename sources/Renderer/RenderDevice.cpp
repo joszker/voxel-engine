@@ -352,3 +352,38 @@ VkBool32 RenderDevice::debugMessageHandler(
 
     return VK_FALSE;
 }
+
+
+VkShaderModule RenderDevice::CreateShaderModule(std::span<const byte> code) const
+{
+    VkShaderModuleCreateInfo info = { VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO };
+    info.codeSize = code.size();
+    info.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+    VkShaderModule shaderModule;
+    VK_CHECK(vkCreateShaderModule(m_device, &info, nullptr, &shaderModule));
+
+    return shaderModule;
+}
+
+
+VkSemaphore RenderDevice::MakeSemaphore() const
+{
+    VkSemaphoreCreateInfo info = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+
+    VkSemaphore semaphore;
+    VK_CHECK(vkCreateSemaphore(m_device, &info, nullptr, &semaphore));
+    return semaphore;
+}
+
+
+VkFence RenderDevice::MakeFence(bool signaled) const
+{
+    VkFenceCreateInfo info = { VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    if (signaled)
+        info.flags |= VK_FENCE_CREATE_SIGNALED_BIT;
+
+    VkFence fence;
+    VK_CHECK(vkCreateFence(m_device, &info, nullptr, &fence));
+    return fence;
+}

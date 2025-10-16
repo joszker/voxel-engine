@@ -12,17 +12,22 @@ set(sources
     ${SOURCE_DIR}/main.cpp
     ${SOURCE_DIR}/Application.h
     ${SOURCE_DIR}/Application.cpp
+    ${SOURCE_DIR}/Scene.h
+    ${SOURCE_DIR}/Scene.cpp
     ${SOURCE_DIR}/Base/Debug.cpp
     ${SOURCE_DIR}/Base/Log.h
     ${SOURCE_DIR}/Base/Log.cpp
     ${SOURCE_DIR}/Renderer/RenderDevice.h
     ${SOURCE_DIR}/Renderer/RenderDevice.cpp
+    ${SOURCE_DIR}/Renderer/PipelineBuilder.h
+    ${SOURCE_DIR}/Renderer/PipelineBuilder.cpp
 )
 
 
 #======================================== VxDemo ========================================#
 add_executable(VxDemo ${sources} ${includes})
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT VxDemo)
+set_property(TARGET VxDemo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
 
 set_target_properties(VxDemo PROPERTIES

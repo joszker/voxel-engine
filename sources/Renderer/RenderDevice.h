@@ -11,6 +11,10 @@ public:
     bool Init(struct GLFWwindow* window, bool debug);
 
 
+    VkShaderModule CreateShaderModule(std::span<const byte> code) const;
+    VkSemaphore MakeSemaphore() const;
+    VkFence MakeFence(bool signaled=false) const;
+
 
     inline VkInstance GetInstance() const { return m_instance; }
     inline operator VkDevice() const { return m_device; }

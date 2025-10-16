@@ -1,6 +1,6 @@
 #include "Application.h"
+#include "Scene.h"
 #include "Base/Log.h"
-#include "Renderer/RenderDevice.h"
 
 #include <GLFW/glfw3.h>
 
@@ -39,13 +39,14 @@ bool Application::Run()
     if (!(m_window = glfwCreateWindow(1280, 720, "VxDemo", nullptr, nullptr)))
         return false;
 
-    
-    RenderDevice device;
-    device.Init(m_window, true);
+    Scene scene;
+    scene.Init(m_window);
 
     while (!glfwWindowShouldClose(m_window)) 
     {
         glfwPollEvents();
+
+        scene.Render();
     }
 
     return true;
