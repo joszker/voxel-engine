@@ -65,6 +65,8 @@ namespace Log
     #define LOG_LEVEL 0
 #endif
 
+#define LOG_GENERIC(level, ...) Log::GetMainLogger().Message(level, __FILE__, __LINE__, __VA_ARGS__)
+
 #if LOG_LEVEL <= LOG_LEVEL_TRACE
     #define LOG_TRACE(...)      Log::GetMainLogger().Message(LOG_LEVEL_TRACE, __FILE__, __LINE__, __VA_ARGS__)
 #endif

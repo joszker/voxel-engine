@@ -10,8 +10,13 @@ set(CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
 set(sources
     ${SOURCE_DIR}/main.cpp
+    ${SOURCE_DIR}/Application.h
+    ${SOURCE_DIR}/Application.cpp
     ${SOURCE_DIR}/Base/Debug.cpp
+    ${SOURCE_DIR}/Base/Log.h
     ${SOURCE_DIR}/Base/Log.cpp
+    ${SOURCE_DIR}/Renderer/RenderDevice.h
+    ${SOURCE_DIR}/Renderer/RenderDevice.cpp
 )
 
 
@@ -24,6 +29,10 @@ set_target_properties(VxDemo PROPERTIES
     CXX_STANDARD 20
     CXX_STANDARD_REQUIRED NO
     CXX_EXTENSIONS NO
+)
+
+target_include_directories(VxDemo PRIVATE
+    ${SOURCE_DIR}/
 )
 
 
