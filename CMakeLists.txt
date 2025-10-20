@@ -4,8 +4,22 @@ project(VxThesis)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sources)
+set(IMGUI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sources/3rdparty/imgui)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+
+
+
+set(imgui_sources
+    ${IMGUI_SOURCE_DIR}/imgui.cpp
+    ${IMGUI_SOURCE_DIR}/imgui_demo.cpp
+    ${IMGUI_SOURCE_DIR}/imgui_draw.cpp
+    ${IMGUI_SOURCE_DIR}/imgui_tables.cpp
+    ${IMGUI_SOURCE_DIR}/imgui_widgets.cpp
+    ${IMGUI_SOURCE_DIR}/backends/imgui_impl_glfw.cpp
+    ${IMGUI_SOURCE_DIR}/backends/imgui_impl_vulkan.cpp
+)
+source_group(ImGui FILES ${imgui_sources})
 
 
 set(sources
@@ -25,7 +39,7 @@ set(sources
 
 
 #======================================== VxDemo ========================================#
-add_executable(VxDemo ${sources} ${includes})
+add_executable(VxDemo ${sources} ${imgui_sources} ${includes})
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT VxDemo)
 set_property(TARGET VxDemo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
 
@@ -37,7 +51,8 @@ set_target_properties(VxDemo PROPERTIES
 )
 
 target_include_directories(VxDemo PRIVATE
-    ${SOURCE_DIR}/
+    ${SOURCE_DIR}
+    ${IMGUI_SOURCE_DIR}
 )
 
 
