@@ -32,7 +32,7 @@
 #   elif COMPILER_CLANG || COMPILER_GCC
 #       define TRAP()   __builtin_trap()
 #   else
-#       define TRAP()   do { *((int*)0) = 0 } while (0)
+#       define TRAP()   do { *(int*)0 = 0; } while (0)
 #   endif
 #endif
 

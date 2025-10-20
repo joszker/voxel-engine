@@ -200,6 +200,41 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
     LOG_INFO("Graphics Queue = {}", (void*)m_graphicsQueue);
     LOG_INFO(" Present Queue = {}", (void*)m_presentQueue);
 
+    /* Create swap chain */
+    {
+        ResizeSwapChain(window);
+    }
+
+    return true;
+}
+
+
+void RenderDevice::ResizeSwapChain(struct GLFWwindow* window)
+{
+    int width, height;
+    glfwGetFramebufferSize(window, &width, &height);
+    ResizeSwapChain(uint32_t(width), uint32_t(height));    
+}
+
+
+void RenderDevice::ResizeSwapChain(uint32_t width, uint32_t height)
+{
+    if (m_swapChain)
+    {
+        /* Wait for all outstanding queue operations to complete */
+        vkDeviceWaitIdle(m_device);
+
+        /* Destroy swap chain image views */
+        for (VkImageView swapImageView : m_swapImageViews)
+        {
+            vkDestroyImageView(m_device, swapImageView, NULL);
+        }
+        m_swapImageViews.clear();
+
+        vkDestroySwapchainKHR(m_device, m_swapChain, NULL);
+        m_swapChain = VK_NULL_HANDLE;
+        m_swapImages.clear();
+    }
 
     /* Create swap chain and swap images */
     {
@@ -236,6 +271,7 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
                     m_swapImageFormat = surfaceFormat.format;
             }
         }
+        m_swapImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
 
         /* Choose present mode */
         VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
@@ -251,9 +287,6 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         /* Determine image extent */
         if (surfaceCaps.currentExtent.width == 0xFFFFFFFF)
         {   
-            int width, height;
-            glfwGetFramebufferSize(window, &width, &height);
-
             m_swapChainExtent.width = std::min(std::max((uint32_t)width, surfaceCaps.minImageExtent.width), surfaceCaps.maxImageExtent.width);
             m_swapChainExtent.height = std::min(std::max((uint32_t)height, surfaceCaps.minImageExtent.height), surfaceCaps.maxImageExtent.height);
         }
@@ -319,7 +352,6 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
             VK_CHECK(vkCreateImageView(m_device, &info, NULL, &m_swapImageViews[i]));
         }
     }
-    return true;
 }
 
 

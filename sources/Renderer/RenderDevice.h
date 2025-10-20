@@ -10,6 +10,9 @@ public:
 
     bool Init(struct GLFWwindow* window, bool debug);
 
+    void ResizeSwapChain(struct GLFWwindow* window);
+    void ResizeSwapChain(uint32_t width, uint32_t height);
+
 
     VkShaderModule CreateShaderModule(std::span<const byte> code) const;
     VkSemaphore MakeSemaphore() const;
@@ -43,18 +46,18 @@ private:
 
 
 private:
-    VkInstance m_instance;
-    VkSurfaceKHR m_surface;
-    VkPhysicalDevice m_adapter;
-    VkPhysicalDeviceFeatures m_adapterFeatures;
-    VkDevice m_device;
+    VkInstance m_instance{};
+    VkSurfaceKHR m_surface{};
+    VkPhysicalDevice m_adapter{};
+    VkPhysicalDeviceFeatures m_adapterFeatures{};
+    VkDevice m_device{};
     uint32_t m_presentQueueFamily;
     uint32_t m_graphicsQueueFamily;
     uint32_t m_computeQueueFamily;
     uint32_t m_transferQueueFamily;
-    VkQueue m_presentQueue;
-    VkQueue m_graphicsQueue;
-    VkSwapchainKHR m_swapChain;
+    VkQueue m_presentQueue{};
+    VkQueue m_graphicsQueue{};
+    VkSwapchainKHR m_swapChain{};
     VkFormat m_swapImageFormat;
     VkExtent2D m_swapChainExtent;
     std::vector<VkImage> m_swapImages;

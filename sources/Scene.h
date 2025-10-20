@@ -10,12 +10,15 @@ public:
     void Init(struct GLFWwindow *window);
     void Render();
 
+    void OnResize(uint width, uint height);
+
 private:
     void recordCommandBuffer(size_t imageIndex);
 
 private:
     const size_t k_maxFramesInFlight = 2;
 
+    struct GLFWwindow *m_window;
     RenderDevice m_device;
     VkPipeline m_pipeline{};
     VkCommandPool m_cmdPool{};

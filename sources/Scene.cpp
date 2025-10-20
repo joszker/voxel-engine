@@ -3,6 +3,10 @@
 
 #include "Base/FileSystem.h"
 
+#include <imgui.h>
+#include <backends/imgui_impl_glfw.h>
+#include <backends/imgui_impl_vulkan.h>
+
 
 Scene::Scene()
 {
@@ -12,6 +16,7 @@ Scene::Scene()
 
 void Scene::Init(struct GLFWwindow *window)
 {
+    m_window = window;
     m_device.Init(window, true);
 
     /* Create pipeline */
@@ -39,6 +44,69 @@ void Scene::Init(struct GLFWwindow *window)
         pipelineBuilder.SetColorAttachments({ color });
 
         m_pipeline = pipelineBuilder.Build(m_device);
+    }
+
+    /* Init ImGui */
+    {
+        IMGUI_CHECKVERSION();
+        ImGui::CreateContext();
+        if (!ImGui_ImplGlfw_InitForVulkan(window, true))
+        {
+            LOG_ERROR("Failed to initialize imgui for glfw");
+            return;
+        }
+
+        VkDescriptorPoolSize poolSizes[] =
+        {
+            { VK_DESCRIPTOR_TYPE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1000 },
+            { VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_TEXEL_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1000 },
+            { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC, 1000 },
+            { VK_DESCRIPTOR_TYPE_INPUT_ATTACHMENT, 1000 }
+        };
+
+        VkDescriptorPoolCreateInfo poolInfo = {};
+        poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        poolInfo.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+        poolInfo.maxSets = 1000;
+        poolInfo.poolSizeCount = std::size(poolSizes);
+        poolInfo.pPoolSizes = poolSizes;
+
+        VkDescriptorPool imguiPool;
+	    VK_CHECK(vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &imguiPool));
+
+        VkFormat swapChainFormat = m_device.GetSwapChainImageFormat();
+
+        ImGui_ImplVulkan_InitInfo info = {};
+        info.ApiVersion = VK_API_VERSION_1_3;
+        info.Instance = m_device.GetInstance();
+        info.PhysicalDevice = m_device.GetAdapter();
+        info.Device = (VkDevice)m_device;
+        info.QueueFamily = m_device.GetGraphicsQueueFamily();
+        info.Queue = m_device.GetGraphicsQueue();
+        info.DescriptorPool = imguiPool;
+        info.MinImageCount = 3;
+        info.ImageCount = 3;
+        info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_1_BIT;
+        info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+        info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &swapChainFormat;
+        info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+        info.UseDynamicRendering = true;
+
+        if (!ImGui_ImplVulkan_Init(&info))
+        {
+            LOG_ERROR("Failed to initialize imgui for vulkan");
+            return;
+        }
+
+        ImGuiIO& io = ImGui::GetIO();
+        //io.Fonts->AddFontFromFileTTF("data/fonts/Tamzen8x16b.ttf", 16.0f);
     }
 
     /* Create command pool */
@@ -82,16 +150,50 @@ void Scene::Init(struct GLFWwindow *window)
 
 void Scene::Render()
 {
+    /* ImGui */
+    {
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+
+        ImGui::NewFrame();
+        ImGui::ShowDemoWindow();
+        ImGui::Render();
+    }
+
+
     VkSemaphore imageAvailable = m_imageAvailable[m_frameIndex];
     VkSemaphore renderFinished = m_renderFinished[m_frameIndex];
     VkFence inFlight = m_inFlight[m_frameIndex];
 
-
     VK_CHECK(vkWaitForFences(m_device, 1, &inFlight, VK_TRUE, UINT64_MAX));
-    VK_CHECK(vkResetFences(m_device, 1, &inFlight));
 
     uint32_t imageIndex;
-    VK_CHECK(vkAcquireNextImageKHR(m_device, m_device.GetSwapChain(), UINT64_MAX, imageAvailable, VK_NULL_HANDLE, &imageIndex));
+    {
+        VkResult result = vkAcquireNextImageKHR(m_device, m_device.GetSwapChain(), UINT64_MAX, imageAvailable, VK_NULL_HANDLE, &imageIndex);
+
+        if (result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            m_device.ResizeSwapChain(m_window);
+            return;
+        }
+        else if (result == VK_SUBOPTIMAL_KHR)
+        {
+            LOG_WARNING("Suboptimal swap chain");
+        }
+        else if (result != VK_SUCCESS)
+        {
+            LOG_ERROR("Failed to present swap chain image");
+            return;
+        }
+    }
+    VK_CHECK(vkResetFences(m_device, 1, &inFlight));
+
+    /* Record command buffer */
+    {
+        vkResetCommandBuffer(m_cmdBuffers[imageIndex],  0);
+        recordCommandBuffer(imageIndex);
+    }
+
 
     VkSemaphore waitSemaphores[] = { imageAvailable };
     VkSemaphore signalSemaphores[] = { renderFinished };
@@ -131,6 +233,12 @@ void Scene::Render()
     }
     m_frameIndex += 1;
     m_frameIndex %= k_maxFramesInFlight;
+}
+
+
+void Scene::OnResize(uint width, uint height)
+{
+
 }
 
 
@@ -191,8 +299,15 @@ void Scene::recordCommandBuffer(size_t imageIndex)
     }
 
     vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
-    vkCmdEndRendering(cmdBuffer);
 
+    /* Render ImGui */
+    if (ImDrawData* drawData = ImGui::GetDrawData())
+    {
+        ImGui_ImplVulkan_RenderDrawData(drawData, cmdBuffer);
+    }
+    
+
+    vkCmdEndRendering(cmdBuffer);
     MakeImagePresentable(cmdBuffer, image);
 
     VK_CHECK(vkEndCommandBuffer(cmdBuffer));

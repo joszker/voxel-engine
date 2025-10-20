@@ -1,5 +1,4 @@
 #include "Application.h"
-#include "Scene.h"
 #include "Base/Log.h"
 
 #include <GLFW/glfw3.h>
@@ -34,20 +33,31 @@ bool Application::Run()
         return false;
 
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     if (!(m_window = glfwCreateWindow(1280, 720, "VxDemo", nullptr, nullptr)))
         return false;
 
-    Scene scene;
-    scene.Init(m_window);
+
+    glfwSetWindowUserPointer(m_window, this);
+    glfwSetFramebufferSizeCallback(m_window, onWindowResize);
+
+    m_scene.Init(m_window);
 
     while (!glfwWindowShouldClose(m_window)) 
     {
         glfwPollEvents();
 
-        scene.Render();
+        m_scene.Render();
     }
 
     return true;
+}
+
+
+void Application::onWindowResize(GLFWwindow *window, int width, int height)
+{
+    auto app = (Application*)glfwGetWindowUserPointer(window);
+
+    app->m_scene.OnResize(width, height);
 }
