@@ -7,6 +7,8 @@
 #include <array>
 
 
+#define VMA_IMPLEMENTATION
+#include <vk_mem_alloc.h>
 
 
 bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
@@ -76,8 +78,7 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
 
     /* Create surface */
     {
-        if (glfwCreateWindowSurface(m_instance, window, NULL, &m_surface) != VK_SUCCESS)
-            return false;
+        VK_CHECK(glfwCreateWindowSurface(m_instance, window, NULL, &m_surface));
     }
 
     /* Choose physical device (adapter) */
@@ -200,158 +201,31 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
     LOG_INFO("Graphics Queue = {}", (void*)m_graphicsQueue);
     LOG_INFO(" Present Queue = {}", (void*)m_presentQueue);
 
-    /* Create swap chain */
+
+    /* Create memory allocator */
     {
-        ResizeSwapChain(window);
+        VmaAllocatorCreateInfo info = {};
+        info.flags = 0,
+        info.physicalDevice = m_adapter,
+        info.device = m_device,
+        info.instance = m_instance,
+        info.vulkanApiVersion = VK_API_VERSION_1_3;
+
+        VK_CHECK(vmaCreateAllocator(&info, &m_allocator));
+    }
+
+
+    /* Create command pool */
+    {
+        VkCommandPoolCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        info.queueFamilyIndex = m_graphicsQueueFamily;
+
+        VK_CHECK(vkCreateCommandPool(m_device, &info, nullptr, &m_graphicsCmdPool));
     }
 
     return true;
-}
-
-
-void RenderDevice::ResizeSwapChain(struct GLFWwindow* window)
-{
-    int width, height;
-    glfwGetFramebufferSize(window, &width, &height);
-    ResizeSwapChain(uint32_t(width), uint32_t(height));    
-}
-
-
-void RenderDevice::ResizeSwapChain(uint32_t width, uint32_t height)
-{
-    if (m_swapChain)
-    {
-        /* Wait for all outstanding queue operations to complete */
-        vkDeviceWaitIdle(m_device);
-
-        /* Destroy swap chain image views */
-        for (VkImageView swapImageView : m_swapImageViews)
-        {
-            vkDestroyImageView(m_device, swapImageView, NULL);
-        }
-        m_swapImageViews.clear();
-
-        vkDestroySwapchainKHR(m_device, m_swapChain, NULL);
-        m_swapChain = VK_NULL_HANDLE;
-        m_swapImages.clear();
-    }
-
-    /* Create swap chain and swap images */
-    {
-        VkSurfaceCapabilitiesKHR surfaceCaps;
-        VK_CHECK(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(m_adapter, m_surface, &surfaceCaps));
-
-        /* Get surface formats */
-        uint32_t numSurfaceFormats;
-        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_adapter, m_surface, &numSurfaceFormats, NULL));
-        std::vector<VkSurfaceFormatKHR> surfaceFormats;
-        surfaceFormats.resize(numSurfaceFormats);
-        VK_CHECK(vkGetPhysicalDeviceSurfaceFormatsKHR(m_adapter, m_surface, &numSurfaceFormats, surfaceFormats.data()));
-
-        /* Get present modes */
-        uint32_t numPresentModes;
-        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_adapter, m_surface, &numPresentModes, NULL));
-        std::vector<VkPresentModeKHR> presentModes;
-        presentModes.resize(numPresentModes);
-        VK_CHECK(vkGetPhysicalDeviceSurfacePresentModesKHR(m_adapter, m_surface, &numPresentModes, presentModes.data()));
-        
-        /* Choose image format */
-        m_swapImageFormat = VK_FORMAT_UNDEFINED;
-        for (auto surfaceFormat : surfaceFormats)
-        {
-            if (surfaceFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
-            {   
-                if (surfaceFormat.format == VK_FORMAT_B8G8R8A8_SRGB)
-                {
-                    m_swapImageFormat = VK_FORMAT_B8G8R8A8_SRGB;
-                    break;
-                }
-
-                if (m_swapImageFormat == VK_FORMAT_UNDEFINED)
-                    m_swapImageFormat = surfaceFormat.format;
-            }
-        }
-        m_swapImageFormat = VK_FORMAT_B8G8R8A8_UNORM;
-
-        /* Choose present mode */
-        VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-        for (auto mode : presentModes)
-        {
-            if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
-            {
-                presentMode = mode; 
-                break;
-            }
-        }
-
-        /* Determine image extent */
-        if (surfaceCaps.currentExtent.width == 0xFFFFFFFF)
-        {   
-            m_swapChainExtent.width = std::min(std::max((uint32_t)width, surfaceCaps.minImageExtent.width), surfaceCaps.maxImageExtent.width);
-            m_swapChainExtent.height = std::min(std::max((uint32_t)height, surfaceCaps.minImageExtent.height), surfaceCaps.maxImageExtent.height);
-        }
-        else
-        {
-            m_swapChainExtent = surfaceCaps.currentExtent;
-        }
-
-        uint32_t imageCount = surfaceCaps.minImageCount + 1;
-        imageCount = std::min(imageCount, surfaceCaps.maxImageCount);
-
-        VkSwapchainCreateInfoKHR info = { VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR };
-        info.surface = m_surface;
-        info.minImageCount = imageCount;
-        info.imageFormat = m_swapImageFormat;
-        info.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-        info.imageExtent = m_swapChainExtent;
-        info.imageArrayLayers = 1;
-        info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        info.preTransform = surfaceCaps.currentTransform;
-        info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        info.presentMode = presentMode;
-        info.clipped = VK_TRUE;
-
-        uint32_t queueFamilyIndices[] = { m_graphicsQueueFamily, m_presentQueueFamily };
-        if (m_graphicsQueueFamily != m_presentQueueFamily)
-        {
-            info.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-            info.queueFamilyIndexCount = 2;
-            info.pQueueFamilyIndices = queueFamilyIndices;
-        }
-        else
-        {
-            info.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-        }
-
-        VK_CHECK(vkCreateSwapchainKHR(m_device, &info, NULL, &m_swapChain));
-
-        /* Get swap chain images */
-        uint32_t numSwapChainImages;
-        VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapChain, &numSwapChainImages, NULL));
-        m_swapImages.resize(numSwapChainImages);
-        VK_CHECK(vkGetSwapchainImagesKHR(m_device, m_swapChain, &numSwapChainImages, m_swapImages.data()));
-    }
-
-    /* Create swap chain image views */
-    {
-        m_swapImageViews.resize(m_swapImages.size());
-
-        for (size_t i = 0; i < m_swapImages.size(); i++)
-        {
-            VkImageViewCreateInfo info = {};
-            info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-            info.image = m_swapImages[i];
-            info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            info.format = m_swapImageFormat;
-            info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            info.subresourceRange.baseMipLevel = 0;
-            info.subresourceRange.levelCount = 1;
-            info.subresourceRange.baseArrayLayer = 0;
-            info.subresourceRange.layerCount = 1;
-
-            VK_CHECK(vkCreateImageView(m_device, &info, NULL, &m_swapImageViews[i]));
-        }
-    }
 }
 
 
@@ -418,4 +292,165 @@ VkFence RenderDevice::MakeFence(bool signaled) const
     VkFence fence;
     VK_CHECK(vkCreateFence(m_device, &info, nullptr, &fence));
     return fence;
+}
+
+
+Buffer RenderDevice::CreateBuffer(const BufferDesc& desc)
+{
+    VkBufferCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+        .flags = 0,
+        .size = desc.Size,
+        .usage = desc.Usage,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+
+    VmaAllocationCreateInfo alloc = {
+        .flags = desc.AllocFlags,
+        .usage = desc.AllocType,
+        .requiredFlags = desc.RequiredFlags,
+        .preferredFlags = desc.PreferredFlags,
+    };
+
+    VmaAllocationInfo memory;
+    VmaAllocation allocation;
+    VkBuffer buffer;
+    VK_CHECK(vmaCreateBuffer(m_allocator, &info, &alloc, &buffer, &allocation, &memory));
+
+
+    return Buffer(allocation, buffer, memory.pMappedData);
+}
+
+
+void RenderDevice::DestroyBuffer(const Buffer& buffer)
+{
+    vmaDestroyBuffer(m_allocator, buffer, buffer.GetAllocation());
+}
+
+
+Image RenderDevice::CreateImage(const VkSwapchainCreateInfoKHR& scInfo, VkImage image)
+{
+    VkImageViewCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+        .image = image,
+        .viewType = VK_IMAGE_VIEW_TYPE_2D,
+        .format = scInfo.imageFormat,
+        .subresourceRange = {
+            .aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+            .baseMipLevel = 0,
+            .levelCount = 1,
+            .baseArrayLayer = 0,
+            .layerCount = 1,
+        },
+    };
+
+    VkImageView imageView;
+    VK_CHECK(vkCreateImageView(m_device, &info, nullptr, &imageView));
+
+    ImageDesc desc = {
+        .Type = VK_IMAGE_TYPE_2D,
+        .Format = scInfo.imageFormat,
+        .Usage = scInfo.imageUsage,
+        .Size = { scInfo.imageExtent.width, scInfo.imageExtent.height, 0 },
+        .Layers = scInfo.imageArrayLayers,
+        .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+    };
+    
+    return Image(VMA_NULL, image, imageView, desc, info.subresourceRange);
+}
+
+
+Image RenderDevice::CreateImage(const ImageDesc& desc)
+{
+    VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
+
+    switch (desc.Format)
+    {
+        case VK_FORMAT_D16_UNORM:
+        case VK_FORMAT_X8_D24_UNORM_PACK32:
+        case VK_FORMAT_D32_SFLOAT: 
+            aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+            break;
+
+        case VK_FORMAT_S8_UINT:
+            aspect = VK_IMAGE_ASPECT_STENCIL_BIT;
+            break;
+
+        case VK_FORMAT_D16_UNORM_S8_UINT:
+        case VK_FORMAT_D24_UNORM_S8_UINT:
+        case VK_FORMAT_D32_SFLOAT_S8_UINT:
+            aspect = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+            break;
+    }
+
+    VkImageSubresourceRange subresourceRange = {
+        .aspectMask = aspect,
+        .baseMipLevel = 0,
+        .levelCount = desc.MipLevels,
+        .baseArrayLayer = 0,
+        .layerCount = desc.Layers,
+    };
+
+    return CreateImage(desc, subresourceRange);
+}
+
+
+
+Image RenderDevice::CreateImage(ImageDesc desc, const VkImageSubresourceRange& subresRange)
+{
+    const uint32_t mipLevelLimit = std::bit_width(std::max(std::max(desc.Size.width, desc.Size.height), desc.Size.depth));
+    desc.MipLevels = std::min(desc.MipLevels, mipLevelLimit);
+
+    /* Create image */
+    VkImage image;
+    VmaAllocation allocation;
+    {
+        VkImageCreateInfo info = { 
+            .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+            .imageType = desc.Type,
+            .format = desc.Format,
+            .extent = desc.Size,
+            .mipLevels = desc.MipLevels,
+            .arrayLayers = desc.Layers,
+            .samples = desc.Samples,
+            .tiling = VK_IMAGE_TILING_OPTIMAL,
+            .usage = desc.Usage,
+            .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+            .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED,
+        };
+
+        VmaAllocationCreateInfo alloc = {
+            .usage = VMA_MEMORY_USAGE_AUTO,
+            .requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        };
+
+        VK_CHECK(vmaCreateImage(m_allocator, &info, &alloc, &image, &allocation, nullptr));
+    }
+
+    /* Create image view */
+    VkImageView imageView;
+    {
+        VkImageViewCreateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
+            .image = image,
+            .viewType = desc.ViewType,
+            .format = desc.Format,
+            .subresourceRange = subresRange,
+        };
+
+        VK_CHECK(vkCreateImageView(m_device, &info, nullptr, &imageView));
+    }
+
+    return Image(allocation, image, imageView, desc, subresRange);
+}
+
+
+void RenderDevice::DestroyImage(const Image& image)
+{
+    vkDestroyImageView(m_device, image.GetView(), nullptr);
+
+    if (VmaAllocation allocation = image.GetAllocation())
+    {
+        vmaDestroyImage(m_allocator, image, allocation);
+    }
 }

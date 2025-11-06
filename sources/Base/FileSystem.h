@@ -7,7 +7,7 @@
 #include <fstream>
 
 
-namespace FS
+namespace FileSystem
 {
     inline std::optional<std::vector<byte>> ReadFile(std::string_view path)
     {

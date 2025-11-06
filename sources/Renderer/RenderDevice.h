@@ -1,5 +1,7 @@
+#pragma once
 #include "Base/Base.h"
-#include "VkBase.h"
+#include "Image.h"
+#include "Buffer.h"
 
 
 
@@ -17,16 +19,29 @@ public:
     VkShaderModule CreateShaderModule(std::span<const byte> code) const;
     VkSemaphore MakeSemaphore() const;
     VkFence MakeFence(bool signaled=false) const;
+    
+    Image CreateImage(const VkSwapchainCreateInfoKHR& scInfo, VkImage scImage);
+    Image CreateImage(const ImageDesc& desc);
+    Image CreateImage(ImageDesc desc, const VkImageSubresourceRange& subresRange);
+    void DestroyImage(const Image& image);
+
+    Buffer CreateBuffer(const BufferDesc& desc);
+    void DestroyBuffer(const Buffer& buffer);
 
 
     inline VkInstance GetInstance() const { return m_instance; }
+    inline VkSurfaceKHR GetSurface() const { return m_surface; }
     inline operator VkDevice() const { return m_device; }
 
     inline VkPhysicalDevice GetAdapter() const { return m_adapter; }
     inline uint32_t GetGraphicsQueueFamily() const { return m_graphicsQueueFamily; }
+    inline uint32_t GetPresentQueueFamily() const { return m_presentQueueFamily; }
     inline VkQueue GetGraphicsQueue() const { return m_graphicsQueue; }
     inline VkQueue GetPresentQueue() const { return m_presentQueue; }
 
+    inline VkCommandPool GetGraphicsCommandPool() const { return m_graphicsCmdPool; }
+
+    #if 0
     inline VkSwapchainKHR GetSwapChain() const { return m_swapChain; }
     inline VkFormat GetSwapChainImageFormat() const { return m_swapImageFormat; }
     inline VkExtent2D GetSwapChainExtent() const { return m_swapChainExtent; }
@@ -34,6 +49,7 @@ public:
     inline size_t GetSwapChainImageCount() const { return m_swapImages.size(); }
     inline std::vector<VkImage> GetSwapChainImages() const { return m_swapImages; }
     inline std::vector<VkImageView> GetSwapChainImageViews() const { return m_swapImageViews; }
+    #endif
 
 
 private:
@@ -57,9 +73,15 @@ private:
     uint32_t m_transferQueueFamily;
     VkQueue m_presentQueue{};
     VkQueue m_graphicsQueue{};
+
+    VmaAllocator m_allocator;
+    VkCommandPool m_graphicsCmdPool;
+    
+    #if 0
     VkSwapchainKHR m_swapChain{};
     VkFormat m_swapImageFormat;
     VkExtent2D m_swapChainExtent;
     std::vector<VkImage> m_swapImages;
     std::vector<VkImageView> m_swapImageViews;
+    #endif
 };

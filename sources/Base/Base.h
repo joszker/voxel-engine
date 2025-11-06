@@ -54,6 +54,11 @@
 #endif
 
 
+#ifndef NOT_IMPLEMENTED
+#   define NOT_IMPLEMENTED()    ASSERT(!"Not implemented!")
+#endif
+
+
 #if COMPILER_MSVC
 #   define UNUSED(X)	(__pragma(warning(suppress:4100))(X))
 #else
@@ -84,6 +89,7 @@
 #include <array>
 #include <vector>
 #include <span>
+#include <string_view>
 #include <stdint.h>
 
 

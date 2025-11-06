@@ -1,4 +1,4 @@
-#include "PipelineBuilder.h"
+#include "Pipeline.h"
 #include "VkBase.h"
 #include "Base/Log.h"
 
@@ -6,12 +6,14 @@
 #include <string_view>
 
 
-ColorAttachment::ColorAttachment() : Format(VK_FORMAT_UNDEFINED), BlendState({})
+ColorAttachment::ColorAttachment() 
+    : ColorAttachment(VK_FORMAT_UNDEFINED)
 {
 
 }
 
-ColorAttachment::ColorAttachment(VkFormat format) : ColorAttachment(format, {})
+ColorAttachment::ColorAttachment(VkFormat format) 
+    : ColorAttachment(format, { .colorWriteMask = VK_COLOR_COMPONENT_R_BIT|VK_COLOR_COMPONENT_G_BIT|VK_COLOR_COMPONENT_B_BIT|VK_COLOR_COMPONENT_A_BIT})
 {
     
 }
@@ -69,9 +71,6 @@ PipelineBuilder::PipelineBuilder()
     m_rendering.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
     m_rendering.depthAttachmentFormat = VK_FORMAT_UNDEFINED;
     m_rendering.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
-
-    /* Layout Info */
-    m_layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 }
 
 
@@ -81,7 +80,7 @@ void PipelineBuilder::Reset()
 }
 
 
-VkPipeline PipelineBuilder::Build(VkDevice device)
+Pipeline PipelineBuilder::Build(VkDevice device)
 {
     std::array dynamicStates = {
         VK_DYNAMIC_STATE_VIEWPORT,
@@ -113,11 +112,25 @@ VkPipeline PipelineBuilder::Build(VkDevice device)
 
     /* Pipeline layout */
     VkPipelineLayout layout;
-    VK_CHECK(vkCreatePipelineLayout(device, &m_layoutInfo, nullptr, &layout));
+    {
+        VkPipelineLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = m_descriptorSetLayouts.size();
+        layoutInfo.pSetLayouts = m_descriptorSetLayouts.data();
+        layoutInfo.pushConstantRangeCount = m_pushConstantRanges.size();
+        layoutInfo.pPushConstantRanges = m_pushConstantRanges.data();
+        
+        VK_CHECK(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout));
+    }
     
+    /* Set color attachments */
+    m_colorBlend.pAttachments = m_colorAttachmentStates.data();
+    m_colorBlend.attachmentCount = m_colorAttachmentStates.size();
+    m_rendering.colorAttachmentCount = m_colorAttachmentFormats.size();
+    m_rendering.pColorAttachmentFormats = m_colorAttachmentFormats.data();
 
     /* Create the graphics pipeline */
-    VkPipeline result;
+    VkPipeline pipeline;
     {
         VkGraphicsPipelineCreateInfo info{};
         info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
@@ -137,9 +150,9 @@ VkPipeline PipelineBuilder::Build(VkDevice device)
         info.layout = layout;
         info.renderPass = nullptr;  // use dynamic rendering
 
-        VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &result));
+        VK_CHECK(vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline));
     }
-    return result;
+    return { pipeline, layout };
 }
 
 
@@ -248,11 +261,13 @@ void PipelineBuilder::SetColorAttachments(std::initializer_list<ColorAttachment>
         m_colorAttachmentStates[index] = attachment.BlendState;
         m_colorAttachmentFormats[index] = attachment.Format;
     }
+}
 
-    m_colorBlend.pAttachments = m_colorAttachmentStates.data();
-    m_colorBlend.attachmentCount = m_colorAttachmentStates.size();
-    m_rendering.colorAttachmentCount = m_colorAttachmentFormats.size();
-    m_rendering.pColorAttachmentFormats = m_colorAttachmentFormats.data();
+
+void PipelineBuilder::AddColorAttachment(const ColorAttachment& attachment)
+{
+    m_colorAttachmentStates.push_back(attachment.BlendState);
+    m_colorAttachmentFormats.push_back(attachment.Format);    
 }
 
 
@@ -271,16 +286,16 @@ void PipelineBuilder::SetStencilAttachment(VkFormat format)
 void PipelineBuilder::SetDescriptorLayouts(std::span<VkDescriptorSetLayout> layouts)
 {
     m_descriptorSetLayouts.assign(layouts.begin(), layouts.end());
+}
 
-    m_layoutInfo.pSetLayouts = m_descriptorSetLayouts.data();
-    m_layoutInfo.setLayoutCount = m_descriptorSetLayouts.size();
+
+void PipelineBuilder::AddDescriptorLayout(VkDescriptorSetLayout layout)
+{
+    m_descriptorSetLayouts.push_back(layout);
 }
 
 
 void PipelineBuilder::SetPushConstantRanges(std::span<VkPushConstantRange> ranges)
 {
     m_pushConstantRanges.assign(ranges.begin(), ranges.end());
-
-    m_layoutInfo.pPushConstantRanges = m_pushConstantRanges.data();
-    m_layoutInfo.pushConstantRangeCount = m_pushConstantRanges.size();
 }

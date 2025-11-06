@@ -18,13 +18,23 @@ struct ColorAttachment
 
 
 
+struct Pipeline
+{
+    VkPipeline Handle;
+    VkPipelineLayout Layout;
+
+    inline operator VkPipeline() { return Handle; }
+};
+
+
+
 class PipelineBuilder
 {
 public:
     PipelineBuilder();
 
     void Reset();
-    VkPipeline Build(VkDevice device);
+    Pipeline Build(VkDevice device);
 
     // Shader stages
     void AddShader(VkShaderStageFlagBits stage, VkShaderModule module, const char *entryPoint="main");
@@ -52,11 +62,13 @@ public:
 
     // Rendering
     void SetColorAttachments(std::initializer_list<ColorAttachment> attachments);
+    void AddColorAttachment(const ColorAttachment& attachment);
     void SetDepthAttachment(VkFormat format);
     void SetStencilAttachment(VkFormat format);
 
     // Layout
     void SetDescriptorLayouts(std::span<VkDescriptorSetLayout> layouts);
+    void AddDescriptorLayout(VkDescriptorSetLayout layout);
     void SetPushConstantRanges(std::span<VkPushConstantRange> ranges);
 
 
@@ -67,7 +79,6 @@ private:
     VkPipelineDepthStencilStateCreateInfo   m_depthStencil{};
     VkPipelineColorBlendStateCreateInfo     m_colorBlend{};
     VkPipelineRenderingCreateInfo           m_rendering{};
-    VkPipelineLayoutCreateInfo              m_layoutInfo{};
 
     std::vector<VkPipelineShaderStageCreateInfo> m_shaderStages;
     std::vector<VkVertexInputBindingDescription> m_vertexBindings;

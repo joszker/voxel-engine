@@ -4,7 +4,9 @@ project(VxThesis)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sources)
-set(IMGUI_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/sources/3rdparty/imgui)
+set(DATA_DIR ${CMAKE_CURRENT_SOURCE_DIR}/data)
+set(IMGUI_SOURCE_DIR ${SOURCE_DIR}/3rdparty/imgui)
+set(VMA_SOURCE_DIR ${SOURCE_DIR}/3rdparty/VulkanMemoryAllocator)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 
@@ -24,17 +26,29 @@ source_group(ImGui FILES ${imgui_sources})
 
 set(sources
     ${SOURCE_DIR}/main.cpp
-    ${SOURCE_DIR}/Application.h
-    ${SOURCE_DIR}/Application.cpp
-    ${SOURCE_DIR}/Scene.h
-    ${SOURCE_DIR}/Scene.cpp
     ${SOURCE_DIR}/Base/Debug.cpp
     ${SOURCE_DIR}/Base/Log.h
     ${SOURCE_DIR}/Base/Log.cpp
+    ${SOURCE_DIR}/Demo/Application.h
+    ${SOURCE_DIR}/Demo/Application.cpp
+    ${SOURCE_DIR}/Demo/Scene.h
+    ${SOURCE_DIR}/Demo/Scene.cpp
+    ${SOURCE_DIR}/Demo/MainScene.h
+    ${SOURCE_DIR}/Demo/MainScene.cpp
     ${SOURCE_DIR}/Renderer/RenderDevice.h
     ${SOURCE_DIR}/Renderer/RenderDevice.cpp
-    ${SOURCE_DIR}/Renderer/PipelineBuilder.h
-    ${SOURCE_DIR}/Renderer/PipelineBuilder.cpp
+    ${SOURCE_DIR}/Renderer/SwapChain.h
+    ${SOURCE_DIR}/Renderer/SwapChain.cpp
+    ${SOURCE_DIR}/Renderer/Pipeline.h
+    ${SOURCE_DIR}/Renderer/Pipeline.cpp
+    ${SOURCE_DIR}/Renderer/Image.h
+    ${SOURCE_DIR}/Renderer/Image.cpp
+    ${SOURCE_DIR}/Renderer/DescriptorSet.h
+    ${SOURCE_DIR}/Renderer/DescriptorSet.cpp
+    ${SOURCE_DIR}/Renderer/Buffer.h
+    ${SOURCE_DIR}/Renderer/Buffer.cpp
+    ${SOURCE_DIR}/Renderer/CommandBuffer.h
+    ${SOURCE_DIR}/Renderer/CommandBuffer.cpp
 )
 
 
@@ -53,6 +67,7 @@ set_target_properties(VxDemo PROPERTIES
 target_include_directories(VxDemo PRIVATE
     ${SOURCE_DIR}
     ${IMGUI_SOURCE_DIR}
+    ${VMA_SOURCE_DIR}
 )
 
 
@@ -66,5 +81,30 @@ target_link_libraries(VxDemo PRIVATE ${Vulkan_LIBRARIES})
 include(${CMAKE_DIR}/LinkGLFW.cmake)
 LinkGLFW(VxDemo PRIVATE)
 
+
+#==================================== Compile shaders ===================================#
+set(SHADER_DIR ${SOURCE_DIR}/Shaders)
+file(GLOB SHADER_FILES ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.comp)
+
+set(SHADER_OUTPUT_DIR "${DATA_DIR}/shaders")
+set(SHADER_OUTPUT_FILES "")
+
+foreach(SHADER_INPUT_FILE IN LISTS SHADER_FILES)
+    get_filename_component(FILE_NAME ${SHADER_INPUT_FILE} NAME)
+    set(SHADER_OUTPUT_FILE "${SHADER_OUTPUT_DIR}/${FILE_NAME}.spv")
+
+    add_custom_command(
+        OUTPUT  ${SHADER_OUTPUT_FILE}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
+        COMMAND ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE} -V ${SHADER_INPUT_FILE} -o ${SHADER_OUTPUT_FILE}
+        DEPENDS ${SHADER_INPUT_FILE}
+        COMMENT "Compiling shader: ${FILE_NAME}"
+        VERBATIM
+    )
+    list(APPEND SHADER_OUTPUT_FILES ${SHADER_OUTPUT_FILE})
+endForeach()
+
+add_custom_target(Shaders ALL DEPENDS ${SHADER_OUTPUT_FILES})
+add_dependencies(VxDemo Shaders)
 
 #========================================================================================#
