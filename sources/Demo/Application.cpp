@@ -46,7 +46,14 @@ bool Application::Run()
         glfwSetFramebufferSizeCallback(m_window, onResizeEvent);
         glfwSetKeyCallback(m_window, onKeyEvent);
         glfwSetMouseButtonCallback(m_window, onMouseButtonEvent);
+        glfwSetCursorPosCallback(m_window, onMouseMovedEvent);
     }
+
+    glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
+
+    const u64 timerFreq = glfwGetTimerFrequency();
+    u64 prevTime = glfwGetTimerValue();
 
 
     m_device.Init(m_window, true);
@@ -58,24 +65,28 @@ bool Application::Run()
     {
         glfwPollEvents();
 
-        //imguiLayer->BeginNewFrame();
+        u64 currTime = glfwGetTimerValue();
+        f32 deltaTime = f32(currTime - prevTime) / f32(timerFreq);
+        prevTime = currTime;
 
         if (Scene* currentScene = getCurrentScene())
         {
-            currentScene->OnUpdate(0.0f);
+            currentScene->OnUpdate(deltaTime);
 
             CommandBuffer cmdBuffer;
             Image* image = m_swapChain.AcquireImage(&cmdBuffer);
+            if (image)
+            {
+                cmdBuffer.Begin();
+                currentScene->OnRender(*image, cmdBuffer);
+                MakeImagePresentable(cmdBuffer, *image);
+                cmdBuffer.End();
 
-            cmdBuffer.Begin();
-            currentScene->OnRender(*image, cmdBuffer);
-            MakeImagePresentable(cmdBuffer, *image);
-            cmdBuffer.End();
+                m_swapChain.Submit(cmdBuffer);
 
-            m_swapChain.Submit(cmdBuffer);
+                m_swapChain.Present();
+            }
         }
-
-        m_swapChain.Present();
     }
 
     return true;
@@ -146,6 +157,17 @@ void Application::onMouseButtonEvent(Window window, int button, int action, int 
     {
         currentScene->OnMouseButtonEvent(button, action);
     }
+}
+
+
+void Application::onMouseMovedEvent(Window window, double xpos, double ypos)
+{
+    auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+    if (Scene* currentScene = app->getCurrentScene())
+    {
+        currentScene->OnMouseMovedEvent(Vec2(float(xpos), float(ypos)));
+    }    
 }
 
 

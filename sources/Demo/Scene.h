@@ -24,10 +24,16 @@ public:
     virtual void OnResizeEvent(int width, int height) {}
     virtual bool OnKeyEvent(int key, int scancode, int action) { return false; }
     virtual bool OnMouseButtonEvent(int button, int action) { return false; }
+    virtual void OnMouseMovedEvent(Vec2 pos) {}
 
     void Attach(Application* app);
     void Push(std::shared_ptr<Scene> scene);
     void Transition(std::shared_ptr<Scene> scene);
+
+protected:
+    bool isKeyDown(int key);
+    bool isMouseButtonDown(int button);
+    Vec2 getCursorPosition();
 
 protected:
     Application *m_app;

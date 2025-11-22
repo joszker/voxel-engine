@@ -82,6 +82,11 @@ include(${CMAKE_DIR}/LinkGLFW.cmake)
 LinkGLFW(VxDemo PRIVATE)
 
 
+# GLM
+include(${CMAKE_DIR}/LinkGLM.cmake)
+LinkGLM(VxDemo PRIVATE)
+
+
 #==================================== Compile shaders ===================================#
 set(SHADER_DIR ${SOURCE_DIR}/Shaders)
 file(GLOB SHADER_FILES ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.comp)

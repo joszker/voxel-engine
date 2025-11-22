@@ -18,10 +18,12 @@ public:
     void OnRender(Image& image, CommandBuffer& cmdBuffer) override;
 
     void OnResizeEvent(int width, int height) override;
+    bool OnKeyEvent(int key, int scancode, int action) override;
+    void OnMouseMovedEvent(Vec2 pos) override;
 
 
 private:
-    void createImages();
+    void createImages(int width, int height);
     VkShaderModule loadShader(std::string_view path);
 
     void initImGui();
@@ -42,4 +44,15 @@ private:
         Image primaryImage;
     };
     std::vector<Frame> m_frames;
+
+    Vec2 m_prevCursorPos{};
+
+    struct
+    {
+        bool active;
+        Vec3 pos;
+        Vec3 dir;
+        f32 yaw;
+        f32 pitch;
+    } m_camera{};
 };

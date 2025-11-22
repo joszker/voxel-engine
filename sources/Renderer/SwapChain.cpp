@@ -126,6 +126,12 @@ void SwapChain::Recreate()
             m_extent = surfaceCaps.currentExtent;
         }
 
+        if (m_extent.width == 0 || m_extent.height == 0)
+        {
+            /* Window is minimized */
+            return;
+        }
+
         uint32_t imageCount = surfaceCaps.minImageCount + 1;
         imageCount = std::min(imageCount, surfaceCaps.maxImageCount);
 
@@ -181,6 +187,9 @@ void SwapChain::Recreate()
 
 Image* SwapChain::AcquireImage(CommandBuffer *cmdBuffer)
 {
+    if (!m_handle)
+        return nullptr;
+
     Frame& currentFrame = m_frames[m_frameIndex];
 
     VK_CHECK(vkWaitForFences(m_device, 1, &currentFrame.inFlight, VK_TRUE, UINT64_MAX));

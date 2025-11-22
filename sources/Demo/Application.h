@@ -28,6 +28,7 @@ private:
     static void onResizeEvent(Window window, int width, int height);
     static void onKeyEvent(Window window, int key, int scancode, int action, int mods);
     static void onMouseButtonEvent(Window window, int button, int action, int mods);
+    static void onMouseMovedEvent(Window window, double xpos, double ypos);
 
     Scene* getCurrentScene();
 

@@ -123,3 +123,13 @@ namespace Debug
 {
     bool ReportAssert(const char *expr, const char *file, const char *func, size_t line);
 };
+
+
+#include <glm/matrix.hpp>
+
+
+using Vec2 = glm::vec2;
+using Vec3 = glm::vec3;
+using Vec4 = glm::vec4;
+using Mat4 = glm::mat4;
+
