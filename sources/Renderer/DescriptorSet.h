@@ -30,13 +30,13 @@ struct DescriptorAllocator
 {
     struct Allocation
     {
-        DescriptorLayout *Layout;
+        const DescriptorLayout *Layout;
         VkDescriptorSet *Set;
     };
     std::vector<Allocation> Allocations;
     std::vector<VkDescriptorPoolSize> Sizes;
 
-    void Add(DescriptorLayout* layout, VkDescriptorSet *set);
+    void Add(const DescriptorLayout* layout, VkDescriptorSet *set);
     VkDescriptorPool Allocate(VkDevice device);
 };
 
@@ -44,9 +44,14 @@ struct DescriptorAllocator
 
 struct DescriptorWriter
 {
+    union DescriptorResourceInfo
+    {
+        VkDescriptorBufferInfo Buffer;
+        VkDescriptorImageInfo Image;
+    };
+
     std::vector<VkWriteDescriptorSet> Writes;
-    std::vector<VkDescriptorBufferInfo> Buffers;
-    std::vector<VkDescriptorImageInfo> Images;
+    std::vector<DescriptorResourceInfo> Resources;
     VkDescriptorSet CurrentSet;
 
     void BindSet(VkDescriptorSet set);

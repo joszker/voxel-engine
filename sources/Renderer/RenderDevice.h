@@ -19,6 +19,7 @@ public:
     VkShaderModule CreateShaderModule(std::span<const byte> code) const;
     VkSemaphore MakeSemaphore() const;
     VkFence MakeFence(bool signaled=false) const;
+    void DestroySemaphore(VkSemaphore semaphore) const;
     
     Image CreateImage(const VkSwapchainCreateInfoKHR& scInfo, VkImage scImage);
     Image CreateImage(const ImageDesc& desc);
@@ -27,6 +28,8 @@ public:
 
     Buffer CreateBuffer(const BufferDesc& desc);
     void DestroyBuffer(const Buffer& buffer);
+
+    void Write(Buffer& buffer, size_t dstOffset, const void *src, size_t numBytes);
 
 
     inline VkInstance GetInstance() const { return m_instance; }

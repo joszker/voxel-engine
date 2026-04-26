@@ -42,7 +42,7 @@ DescriptorLayout DescriptorLayoutBuilder::Build(VkDevice device, VkShaderStageFl
 }
 
 
-void DescriptorAllocator::Add(DescriptorLayout* layout, VkDescriptorSet *set)
+void DescriptorAllocator::Add(const DescriptorLayout* layout, VkDescriptorSet *set)
 {
     Sizes.insert(Sizes.end(), layout->Sizes.begin(), layout->Sizes.end());
 
@@ -100,10 +100,12 @@ void DescriptorWriter::BindSet(VkDescriptorSet set)
 
 void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Buffer& buffer, size_t size, size_t offset)
 {
-    auto& info = Buffers.emplace_back(VkDescriptorBufferInfo{
-        .buffer = buffer,
-        .offset = offset,
-        .range = size,
+    Resources.push_back({ 
+        .Buffer = {
+            .buffer = buffer,
+            .offset = offset,
+            .range = size,
+        }
     });
 
     VkWriteDescriptorSet write = {
@@ -113,7 +115,7 @@ void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Buff
         .dstArrayElement = 0,
         .descriptorCount = 1,
         .descriptorType = type,
-        .pBufferInfo = &info,
+        .pBufferInfo = nullptr,     // NOTE: will be assigned later
     };
 
     Writes.push_back(write);
@@ -122,10 +124,12 @@ void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Buff
 
 void DescriptorWriter::Write(uint32_t binding, const Image& image, VkSampler sampler, VkImageLayout readLayout)
 {
-    auto& info = Images.emplace_back(VkDescriptorImageInfo{
-        .sampler = sampler,
-        .imageView = image.GetView(),
-        .imageLayout = readLayout,      // layout that the image subresource will be in when the descriptor is accessed. 
+    Resources.push_back({
+        .Image = {
+            .sampler = sampler,
+            .imageView = image.GetView(),
+            .imageLayout = readLayout,      // layout that the image subresource will be in when the descriptor is accessed. 
+        },
     });
 
     VkWriteDescriptorSet write = {
@@ -135,7 +139,7 @@ void DescriptorWriter::Write(uint32_t binding, const Image& image, VkSampler sam
         .dstArrayElement = 0,
         .descriptorCount = 1,
         .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-        .pImageInfo = &info,
+        .pImageInfo = nullptr,      // NOTE: will be assigned later
     };
 
     Writes.push_back(write);
@@ -146,10 +150,12 @@ void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Imag
 {
     ASSERT(type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || type == VK_DESCRIPTOR_TYPE_STORAGE_IMAGE);
 
-    auto& info = Images.emplace_back(VkDescriptorImageInfo{
-        .sampler = nullptr,
-        .imageView = image.GetView(),
-        .imageLayout = accessLayout,    // layout that the image subresource will be in when the descriptor is accessed. 
+    Resources.push_back({
+        .Image = {
+            .sampler = nullptr,
+            .imageView = image.GetView(),
+            .imageLayout = accessLayout,    // layout that the image subresource will be in when the descriptor is accessed. 
+        },
     });
 
     VkWriteDescriptorSet write = {
@@ -159,7 +165,7 @@ void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Imag
         .dstArrayElement = 0,
         .descriptorCount = 1,
         .descriptorType = type,
-        .pImageInfo = &info,
+        .pImageInfo = nullptr,      // NOTE: will be assigned later
     };
 
     Writes.push_back(write);    
@@ -169,12 +175,20 @@ void DescriptorWriter::Write(uint32_t binding, VkDescriptorType type, const Imag
 void DescriptorWriter::Reset()
 {
     Writes.clear();
-    Buffers.clear();
-    Images.clear();
+    Resources.clear();
 }
 
 
 void DescriptorWriter::Update(VkDevice device)
 {
+    ASSERT(Writes.size() == Resources.size());
+
+    // Assign resource infos before updating
+    for (size_t i = 0; i < Writes.size(); i++)
+    {
+        Writes[i].pBufferInfo = &Resources[i].Buffer;
+        Writes[i].pImageInfo = &Resources[i].Image;
+    }
+
     vkUpdateDescriptorSets(device, (uint32_t)Writes.size(), Writes.data(), 0, nullptr);
 }

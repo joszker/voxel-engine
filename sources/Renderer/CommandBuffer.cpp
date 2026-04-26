@@ -46,7 +46,7 @@ void CommandBuffer::BeginRenderPass(const RenderPass& renderPass)
         viewport.maxDepth = 1.0f;
 
         VkRect2D scissor{};
-        scissor.offset = {0, 0};
+        scissor.offset = { 0, 0 };
         scissor.extent = { width, height };
 
         SetViewport(viewport);
@@ -133,9 +133,18 @@ void CommandBuffer::Barrier(const MemoryBarrier& barrier, Buffer* buffer)
         .size = VK_WHOLE_SIZE,
     };
 
+    VkPipelineStageFlags currentStage = buffer->GetCurrentStage();
+    if (currentStage == 0)
+        currentStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+
+    if (barrier.PrevStage != 0)
+    {
+        ASSERT(barrier.PrevStage == currentStage);
+    }
+
     vkCmdPipelineBarrier(
         m_handle,
-        buffer->GetCurrentStage(),          // srcStageMask
+        currentStage,                       // srcStageMask
         barrier.NextStage,                  // dstStageMask
         0,                                  // dependencyFlags
         0, nullptr,                         // memory barriers
@@ -189,4 +198,28 @@ void CommandBuffer::SetViewport(const VkViewport& viewport)
 void CommandBuffer::SetScissor(const VkRect2D& scissor)
 {
     vkCmdSetScissor(m_handle, 0, 1, &scissor);
+}
+
+
+void CommandBuffer::Copy(const Buffer *src, Buffer *dst)
+{
+    Copy(src, dst, std::min(src->GetSize(), dst->GetSize()));
+}
+
+void CommandBuffer::Copy(const Buffer *src, Buffer *dst, size_t numBytes)
+{
+    ASSERT((src->GetUsage() & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0);
+    ASSERT((dst->GetUsage() & VK_BUFFER_USAGE_TRANSFER_DST_BIT) != 0);
+
+    ASSERT(numBytes <= src->GetSize());
+    ASSERT(numBytes <= dst->GetSize());
+
+    VkBufferCopy copy = { 
+        .srcOffset = 0, 
+        .dstOffset = 0, 
+        .size = numBytes,
+    };
+    vkCmdCopyBuffer(m_handle, *src, *dst, 1, &copy);
+
+    dst->m_currentStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 }

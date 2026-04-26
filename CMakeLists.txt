@@ -9,6 +9,7 @@ set(IMGUI_SOURCE_DIR ${SOURCE_DIR}/3rdparty/imgui)
 set(VMA_SOURCE_DIR ${SOURCE_DIR}/3rdparty/VulkanMemoryAllocator)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
+set(TESTS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/tests)
 
 
 
@@ -49,6 +50,8 @@ set(sources
     ${SOURCE_DIR}/Renderer/Buffer.cpp
     ${SOURCE_DIR}/Renderer/CommandBuffer.h
     ${SOURCE_DIR}/Renderer/CommandBuffer.cpp
+    ${SOURCE_DIR}/Voxel/SVTree.h
+    ${SOURCE_DIR}/Voxel/SVTree.cpp
 )
 
 
@@ -60,8 +63,8 @@ set_property(TARGET VxDemo PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRE
 
 set_target_properties(VxDemo PROPERTIES
     CXX_STANDARD 20
-    CXX_STANDARD_REQUIRED NO
-    CXX_EXTENSIONS NO
+    CXX_STANDARD_REQUIRED OFF
+    CXX_EXTENSIONS OFF
 )
 
 target_include_directories(VxDemo PRIVATE
@@ -71,23 +74,11 @@ target_include_directories(VxDemo PRIVATE
 )
 
 
-# Vulkan
-find_package(Vulkan REQUIRED)
-target_include_directories(VxDemo PRIVATE ${Vulkan_INCLUDE_DIRS})
-target_link_libraries(VxDemo PRIVATE ${Vulkan_LIBRARIES})
-
-
-# GLFW
-include(${CMAKE_DIR}/LinkGLFW.cmake)
-LinkGLFW(VxDemo PRIVATE)
-
-
-# GLM
-include(${CMAKE_DIR}/LinkGLM.cmake)
-LinkGLM(VxDemo PRIVATE)
-
-
 #==================================== Compile shaders ===================================#
+
+message("::VALIDATOR::")
+message(${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE})
+
 set(SHADER_DIR ${SOURCE_DIR}/Shaders)
 file(GLOB SHADER_FILES ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.comp)
 
@@ -112,4 +103,46 @@ endForeach()
 add_custom_target(Shaders ALL DEPENDS ${SHADER_OUTPUT_FILES})
 add_dependencies(VxDemo Shaders)
 
+#======================================== Tests =========================================#
+add_executable(VxTests
+    ${SOURCE_DIR}/Base/Debug.cpp
+    ${SOURCE_DIR}/Base/Log.cpp
+    ${SOURCE_DIR}/Voxel/SVTree.h
+    ${SOURCE_DIR}/Voxel/SVTree.cpp
+    ${TESTS_SOURCE_DIR}/catch.cpp
+    ${TESTS_SOURCE_DIR}/test_svtree.cpp
+)
+set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT VxTests)
+set_property(TARGET VxTests PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}")
+
+
+set_target_properties(VxTests PROPERTIES
+    CXX_STANDARD 20
+    CXX_STANDARD_REQUIRED OFF
+    CXX_EXTENSIONS OFF
+)
+
+target_include_directories(VxTests PRIVATE
+    ${SOURCE_DIR}
+)
 #========================================================================================#
+
+
+#===================== Dependencies =====================#
+
+# Vulkan
+find_package(Vulkan REQUIRED)
+target_include_directories(VxDemo PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(VxDemo PRIVATE ${Vulkan_LIBRARIES})
+
+
+# GLFW
+include(${CMAKE_DIR}/LinkGLFW.cmake)
+LinkGLFW(VxDemo PRIVATE)
+
+
+# GLM
+include(${CMAKE_DIR}/LinkGLM.cmake)
+LinkGLM(VxDemo PRIVATE)
+LinkGLM(VxTests PRIVATE)
+

@@ -22,8 +22,8 @@ struct RenderPass
 {
     VkRect2D Area = { 0, 0, 0, 0 };
     std::vector<Attachment> Attachments;
-    Attachment* DepthAttachment;
-    Attachment* StencilAttachment;
+    Attachment* DepthAttachment = nullptr;
+    Attachment* StencilAttachment = nullptr;
 };
 
 
@@ -64,6 +64,8 @@ public:
     void SetViewport(const VkViewport& viewport);
     void SetScissor(const VkRect2D& scissor);
 
+    void Copy(const Buffer *src, Buffer *dst);
+    void Copy(const Buffer *src, Buffer *dst, size_t numBytes);
 
 private:
     VkCommandBuffer m_handle{};

@@ -3,6 +3,7 @@
 #include "Renderer/Pipeline.h"
 #include "Renderer/Image.h"
 #include "Renderer/Buffer.h"
+#include "Voxel/SVTree.h"
 
 
 class MainScene : public Scene
@@ -35,6 +36,14 @@ private:
 
     VkSampler m_sampler{};
     VkDescriptorPool m_descriptorPool{};
+
+    SVTree m_svt;
+
+    struct
+    {
+        Buffer gpu;     // gpu local buffer
+        Buffer cpu;     // cpu staging buffer
+    } m_svtBuffer;
 
     struct Frame
     {

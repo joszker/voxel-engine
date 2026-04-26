@@ -11,4 +11,5 @@ macro(LinkGLM TARGET ACCESS)
 
     set_target_properties(glm PROPERTIES FOLDER 3rdparty)
     target_link_libraries(${TARGET} ${ACCESS} glm::glm)
+    target_compile_definitions(${TARGET} ${ACCESS} GLM_ENABLE_EXPERIMENTAL=1)
 endmacro()

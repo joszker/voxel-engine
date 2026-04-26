@@ -176,13 +176,31 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
 
         std::array extensions = { "VK_KHR_swapchain" };
 
-        const VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
-            NULL, VK_TRUE
+        /* Enable dynamic rendering */
+        VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_FEATURES_KHR,
+            .dynamicRendering = VK_TRUE,
+        };
+        
+        /*
+        VkPhysicalDeviceMaintenance9FeaturesKHR m9Features {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MAINTENANCE_9_FEATURES_KHR,
+            .maintenance9 = VK_TRUE,
+        };*/
+
+        /* Enable vulkan 1.2 devkce features */
+        VkPhysicalDeviceVulkan12Features vk12Features {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+            .storageBuffer8BitAccess = VK_TRUE,
+            .shaderInt8 = VK_TRUE,
+            .bufferDeviceAddress = VK_TRUE,
         };
 
+        //m9Features.pNext = &dynamicRenderingFeatures;
+        vk12Features.pNext = &dynamicRenderingFeatures;
+
         VkDeviceCreateInfo info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
-        info.pNext = &dynamicRenderingFeatures;
+        info.pNext = &vk12Features;
         info.pQueueCreateInfos = queueInfos;
         info.queueCreateInfoCount = queueFamilies.size();
         info.pEnabledFeatures = &m_adapterFeatures;
@@ -205,10 +223,10 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
     /* Create memory allocator */
     {
         VmaAllocatorCreateInfo info = {};
-        info.flags = 0,
-        info.physicalDevice = m_adapter,
-        info.device = m_device,
-        info.instance = m_instance,
+        info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
+        info.physicalDevice = m_adapter;
+        info.device = m_device;
+        info.instance = m_instance;
         info.vulkanApiVersion = VK_API_VERSION_1_3;
 
         VK_CHECK(vmaCreateAllocator(&info, &m_allocator));
@@ -295,6 +313,12 @@ VkFence RenderDevice::MakeFence(bool signaled) const
 }
 
 
+void RenderDevice::DestroySemaphore(VkSemaphore semaphore) const
+{
+    vkDestroySemaphore(m_device, semaphore, nullptr);
+}
+
+
 Buffer RenderDevice::CreateBuffer(const BufferDesc& desc)
 {
     VkBufferCreateInfo info = {
@@ -317,14 +341,44 @@ Buffer RenderDevice::CreateBuffer(const BufferDesc& desc)
     VkBuffer buffer;
     VK_CHECK(vmaCreateBuffer(m_allocator, &info, &alloc, &buffer, &allocation, &memory));
 
+    VkDeviceAddress deviceAddress = 0;
+    if (desc.Usage & VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT)
+    {
+        VkBufferDeviceAddressInfo addressInfo = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO_KHR,
+            .buffer = buffer,
+        };
+        deviceAddress = vkGetBufferDeviceAddress(m_device, &addressInfo);
+        ASSERT(deviceAddress != 0);
+    }
 
-    return Buffer(allocation, buffer, memory.pMappedData);
+    return Buffer(allocation, buffer, info.size, info.usage, memory.pMappedData, deviceAddress);
 }
 
 
 void RenderDevice::DestroyBuffer(const Buffer& buffer)
 {
     vmaDestroyBuffer(m_allocator, buffer, buffer.GetAllocation());
+}
+
+void RenderDevice::Write(Buffer& buffer, size_t dstOffset, const void *src, size_t numBytes)
+{
+    VmaAllocation allocation = buffer.GetAllocation();
+
+    void *mapped;
+    vmaMapMemory(m_allocator, allocation, &mapped);
+
+    memcpy((u8*)mapped + dstOffset, src, numBytes);
+
+    VkMemoryPropertyFlags memoryProps;
+    vmaGetAllocationMemoryProperties(m_allocator, allocation, &memoryProps);
+    if (memoryProps & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT == 0)
+    {
+        // Flush required for non-coherent memory.
+        vmaFlushAllocation(m_allocator, allocation, dstOffset, numBytes);
+    }
+
+    vmaUnmapMemory(m_allocator, allocation);
 }
 
 

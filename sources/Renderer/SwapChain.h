@@ -17,6 +17,7 @@ public:
     void Submit(VkCommandBuffer cmds);
     void Present();
 
+    void WaitForPreviousFrames();
 
     inline operator VkSwapchainKHR() const { return m_handle; }
     inline VkFormat GetImageFormat() const { return m_format; }
@@ -24,8 +25,8 @@ public:
     inline VkExtent3D GetSize() const { return { m_extent.width, m_extent.height, 1 }; }
     inline VkRect2D GetArea() const { return VkRect2D{ .offset={}, .extent=m_extent }; }
     inline size_t GetImageCount() const { return m_images.size(); }
-    inline VkImage GetImage(size_t index) const { return m_images[index]; }
-    inline VkImageView GetImageView(size_t index) const { return m_images[index].GetView(); }
+    inline VkImage GetImage(size_t index) const { return m_images[index].target; }
+    inline VkImageView GetImageView(size_t index) const { return m_images[index].target.GetView(); }
 
     inline uint32_t GetFrameCount() const { return (uint32_t)m_frames.size(); }
     inline uint32_t GetCurrentImageIndex() const { return m_imageIndex; }
@@ -37,11 +38,17 @@ private:
     VkSwapchainKHR m_handle{};
     VkFormat m_format{};
     VkExtent2D m_extent{};
-    std::vector<Image> m_images;
+    //std::vector<Image> m_images;
+    struct SwapImage
+    {
+        Image target;
+        VkSemaphore renderFinished;
+    };
+    std::vector<SwapImage> m_images;
     struct Frame
     {
         VkSemaphore imageAvailable;
-        VkSemaphore renderFinished;
+        //VkSemaphore renderFinished;
         VkFence inFlight;
         CommandBuffer cmdBuffer;
     };

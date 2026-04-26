@@ -32,7 +32,7 @@ void SwapChain::Init(struct GLFWwindow* window, uint32_t maxFramesInFlight)
     for (size_t i = 0; i < m_frames.size(); i++)
     {
         m_frames[i].imageAvailable = m_device.MakeSemaphore();
-        m_frames[i].renderFinished = m_device.MakeSemaphore();
+        //m_frames[i].renderFinished = m_device.MakeSemaphore();
         m_frames[i].inFlight = m_device.MakeFence(true);
         m_frames[i].cmdBuffer = CommandBuffer(cmdBuffers[i]);
     }
@@ -49,9 +49,10 @@ void SwapChain::Recreate()
         vkDeviceWaitIdle(m_device);
 
         /* Destroy swap chain image views */
-        for (Image& image : m_images)
+        for (SwapImage& image : m_images)
         {
-            m_device.DestroyImage(image);
+            m_device.DestroyImage(image.target);
+            m_device.DestroySemaphore(image.renderFinished);
         }
         m_images.clear();
 
@@ -179,7 +180,8 @@ void SwapChain::Recreate()
         m_images.resize(swapImages.size());
         for (size_t i = 0; i < swapImages.size(); i++)
         {
-            m_images[i] = m_device.CreateImage(scInfo, swapImages[i]);
+            m_images[i].target = m_device.CreateImage(scInfo, swapImages[i]);
+            m_images[i].renderFinished = m_device.MakeSemaphore();
         }
     }
 }
@@ -220,7 +222,7 @@ Image* SwapChain::AcquireImage(CommandBuffer *cmdBuffer)
     vkResetCommandBuffer(currentFrame.cmdBuffer,  0);
     *cmdBuffer = currentFrame.cmdBuffer;
 
-    return &m_images[m_imageIndex];
+    return &m_images[m_imageIndex].target;
 }
 
 
@@ -228,6 +230,7 @@ void SwapChain::Submit(VkCommandBuffer cmds)
 {
     /* Submit command buffer */
     Frame& currentFrame = m_frames[m_frameIndex];
+    SwapImage& currentImage = m_images[m_imageIndex];
 
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -241,7 +244,7 @@ void SwapChain::Submit(VkCommandBuffer cmds)
     submitInfo.pCommandBuffers = &cmds;
 
     submitInfo.signalSemaphoreCount = 1;
-    submitInfo.pSignalSemaphores = &currentFrame.renderFinished;
+    submitInfo.pSignalSemaphores = &currentImage.renderFinished;
 
     VK_CHECK(vkQueueSubmit(m_device.GetGraphicsQueue(), 1, &submitInfo, currentFrame.inFlight));
 }
@@ -250,11 +253,12 @@ void SwapChain::Submit(VkCommandBuffer cmds)
 void SwapChain::Present()
 {
     Frame& currentFrame = m_frames[m_frameIndex];
+    SwapImage& currentImage = m_images[m_imageIndex];
 
     VkPresentInfoKHR presentInfo{};
     presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     presentInfo.waitSemaphoreCount = 1;
-    presentInfo.pWaitSemaphores = &currentFrame.renderFinished;
+    presentInfo.pWaitSemaphores = &currentImage.renderFinished;
     presentInfo.swapchainCount = 1;
     presentInfo.pSwapchains = &m_handle;
     presentInfo.pImageIndices = &m_imageIndex;
@@ -272,4 +276,20 @@ void SwapChain::Present()
     }
     m_frameIndex += 1;
     m_frameIndex %= uint32_t(m_frames.size());
+}
+
+
+void SwapChain::WaitForPreviousFrames()
+{
+    std::vector<VkFence> inFlightFences;
+    inFlightFences.reserve(m_frames.size() - 1);
+
+    for (size_t i = 1; i < m_frames.size(); i++)
+    {
+        size_t frameIdx = (m_frameIndex + i) % m_frames.size();
+
+        inFlightFences.push_back(m_frames[frameIdx].inFlight);
+    }
+
+    vkWaitForFences(m_device, inFlightFences.size(), inFlightFences.data(), VK_TRUE, UINT64_MAX);
 }

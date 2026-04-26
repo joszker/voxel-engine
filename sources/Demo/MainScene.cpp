@@ -10,7 +10,16 @@
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
 
+#include "Voxel/SVTree.h"
 
+struct GPU_SVTree
+{
+    Vec3i dimensions;
+    u32 root;
+    u32 depth;
+    VkDeviceAddress nodes;      // SVNode*
+    VkDeviceAddress voxels;     // Voxel* 
+};
 
 struct PerFrameData
 {
@@ -23,12 +32,45 @@ struct PerFrameData
     Vec4 CameraDir;
     Vec4 CameraRight;
     Vec4 CameraUp;
+
+    GPU_SVTree Map;
 };
 
 
 
 void MainScene::OnAttach()
 {
+    /*
+    std::vector<Voxel> voxels = {
+        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
+
+        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
+        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
+    };*/
+    const int h = 63;
+    const int w = 63;
+    std::vector<Voxel> voxels;
+    voxels.resize(w * h * 1);
+
+    for (int y = 0; y < h; y++)
+    {
+        for (int x = 0; x < w; x++)
+        {
+            float d = glm::distance(Vec2(float(x)/w, float(y)/h), Vec2(0.5));
+            if (d <= 0.5f)
+                voxels[y * w + x] = Voxel { u8((2 * d * 255)) };
+            else
+                voxels[y * w + x] = Voxel { 0 };
+        }
+    }
+
+    m_svt = SVTree({ voxels, Vec3u(w, h, 1) });
+
     m_camera.pos = Vec3(0.0f, 0.0f, -12.0f);
     m_camera.yaw = glm::half_pi<f32>();
     m_camera.dir = {
@@ -75,7 +117,8 @@ void MainScene::OnAttach()
     {
         DescriptorLayoutBuilder layoutBuilder;
         layoutBuilder.Add(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        layoutBuilder.Add(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        layoutBuilder.Add(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        layoutBuilder.Add(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layout = layoutBuilder.Build(*m_device);
     }
 
@@ -145,6 +188,26 @@ void MainScene::OnAttach()
     vkDestroyShaderModule(*m_device, fullscreenShader, nullptr);
     vkDestroyShaderModule(*m_device, primaryShader, nullptr);
     vkDestroyShaderModule(*m_device, compositeShader, nullptr);
+
+    /* Storage buffers */
+    {
+        const size_t size = 10 * 1024;
+
+        m_svtBuffer.gpu = m_device->CreateBuffer({
+            .Size = size,
+            .Usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            .AllocFlags = 0,
+            .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+        });
+
+        m_svtBuffer.cpu = m_device->CreateBuffer({
+            .Size = size,
+            .Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+            .AllocFlags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+            .RequiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
+        });
+    }
 }
 
 
@@ -215,12 +278,46 @@ void MainScene::OnUpdate(f32 dt)
     ImGui::End();
 
     ImGui::Render();
+
+    frameData->Map.nodes = m_svtBuffer.gpu.GetDeviceAddress();
+    frameData->Map.voxels = frameData->Map.nodes + sizeof(SVNode) * m_svt.GetNodes().size();
+    frameData->Map.depth = m_svt.GetDepth();
+    frameData->Map.dimensions = m_svt.GetDimensions();
 }
 
 
 void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
 {
     Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
+
+
+    if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_T))
+    {
+        m_swapChain->WaitForPreviousFrames();
+      
+        byte data[10 * 1024] = {};
+        {
+            auto srcNodes = m_svt.GetNodes();
+            auto srcVoxels = m_svt.GetVoxels();
+
+            SVNode *dstNodes = (SVNode*)data;
+            Voxel *dstVoxels = (Voxel*)(dstNodes + srcNodes.size());
+
+            memcpy(dstNodes, srcNodes.data(), sizeof(SVNode) * srcNodes.size());
+            memcpy(dstVoxels, srcVoxels.data(), sizeof(Voxel) * srcVoxels.size());
+        }
+
+        m_device->Write(m_svtBuffer.cpu, 0, data, sizeof(data));
+
+        cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,            
+        }, &m_svtBuffer.gpu);
+    }
 
 
     /* Write descriptors */
@@ -230,7 +327,8 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         writer.BindSet(frame.descriptorSet);
         {
             writer.Write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frame.perFrameData);
-            writer.Write(1, frame.primaryImage, m_sampler);
+            writer.Write(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_svtBuffer.gpu);
+            writer.Write(2, frame.primaryImage, m_sampler);
         }
         writer.Update(*m_device);
     }
