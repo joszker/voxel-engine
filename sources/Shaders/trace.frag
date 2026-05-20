@@ -40,7 +40,9 @@ void main()
     vec3 rayPos = u_CameraPos.xyz;
 
 
-    Ray ray = Ray_Init(rayPos, rayDir);
+    FragColor = Trace(u_Map, rayPos, rayDir);
 
-    FragColor = vec4(Trace(u_Map, ray), 1.0);
+    // crosshair
+    FragColor += step(abs(screenPos.y), 0.003) * step(abs(screenPos.x) / 0.5625, 0.025);
+    FragColor += step(abs(screenPos.x) / 0.5625, 0.003) * step(abs(screenPos.y), 0.025);
 }

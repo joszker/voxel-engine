@@ -13,19 +13,6 @@ vec3 hsv2rgb(vec3 c) {
   return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
 }
 
-struct Ray
-{
-    vec3 pos;
-    vec3 signDir;
-    vec3 invDir;
-};
-
-Ray Ray_Init(vec3 pos, vec3 dir)
-{
-    return Ray(pos, sign(dir), 1.0 / dir);
-}
-
-
 
 layout(buffer_reference) readonly buffer SVT_Nodes;
 layout(buffer_reference) readonly buffer SVT_Leafs;
@@ -74,41 +61,6 @@ uint SV_GetChild(SV_Node node, uint index)
 }
 
 
-uint GetVoxel(SV_Tree tree, vec3 position)
-{
-    int scale = int(ipow4(tree.depth - 1));
-    SV_Node node = tree.pNodes.v[0];
-
-    ivec3 pos = ivec3(position);
-
-    if (any(lessThan(pos, ivec3(0))) || any(greaterThanEqual(pos, tree.dimensions)))
-        return 0;
-
-    while (!SV_IsLeaf(node))
-    {
-        ivec3 index3D = pos / scale;
-        uint index = index3D.x + index3D.y * 4 + index3D.z * 16;
-
-        if (!SV_IsOccupied(node, index))
-            return 0;
-
-        uint childPtr = SV_GetChild(node, index);
-        node = tree.pNodes.v[childPtr];
-        pos -= index3D * scale;
-        scale /= 4;
-    }
-
-
- //   uint index = dot(pos, uvec3(1, 4, 16));
-    uint index = pos.x + pos.y * 4 + pos.z * 16;
-
-    if (!SV_IsOccupied(node, index))
-        return 0;
-
-    uint voxelPtr = SV_GetChild(node, index);
-    return uint(tree.pVoxels.v[voxelPtr]);
-}
-
 vec3 GetStepMask(vec3 sideDist)
 {
     bvec3 mask;
@@ -121,35 +73,127 @@ vec3 GetStepMask(vec3 sideDist)
     return vec3(mask);
 }
 
-
 #define MAX_ITERATIONS 128
 
-vec3 Trace(SV_Tree tree, Ray ray)
-{
-    vec3 color = vec3(0.0);
+#define INFINITY        (uintBitsToFloat(0x7F800000))
 
-    vec3 incr;
-    vec3 mapPos = floor(ray.pos);
-    vec3 sideDist = ((mapPos - ray.pos) + 0.5 + ray.signDir * 0.5) * ray.invDir;
+vec4 Trace(SV_Tree tree, vec3 rayOrigin, vec3 rayDir)
+{
+    vec4 color = vec4(0.0);
+
+    struct { uint nodePtr; vec3 nodePos; } stack[22];
+    uint level = tree.depth - 1;
+
+    const vec3 rayInvDir = 1.0 / rayDir;
+    const vec3 raySign = sign(rayDir);
+    const bvec3 rayDirMask = notEqual(rayDir, vec3(0));
+    const vec3 rayDirBias = vec3(1e-4) * raySign;
+
+    const vec3 sideDistStep = mix(vec3(0), rayInvDir, rayDirMask);
+
+    vec3 cellRayOrigin;
+    {
+        const vec3 tMin = -rayOrigin * rayInvDir;
+        const vec3 tMax = (vec3(tree.dimensions) - rayOrigin) * rayInvDir;
+        const vec3 t1 = min(tMin, tMax);
+        const vec3 t2 = max(tMin, tMax);
+        const float tNear = max(max(t1.x, t1.y), t1.z);
+        const float tFar = min(min(t2.x, t2.y), t2.z);
+
+        if (tNear > tFar || tFar < 0.0)
+            return vec4(0.0);
+
+        cellRayOrigin = rayOrigin + 1.0001 * max(tNear, 0.0) * rayDir;
+
+        //if (any(lessThan(cellRayOrigin, vec3(0.0))))
+        //    return vec4(0.0, 1.0, 0.0, 1.0);
+
+        //if (any(lessThan(cellRayOrigin, vec3(0))) || any(greaterThanEqual(cellRayOrigin, vec3(tree.dimensions))))
+        //    return vec4(0.0, 1.0, 0.0, 1.0);
+        cellRayOrigin = clamp(cellRayOrigin, vec3(0), vec3(tree.dimensions));
+    }
+
+    vec3 nodeRayOrigin = cellRayOrigin;
+
+    vec3 nodePos = vec3(0);
+
+    uint nodePtr = 0;
+    SV_Node node = tree.pNodes.v[0];
+    float scale = pow(4.0, float(tree.depth - 1));
+    vec3 cellPos = scale * floor(cellRayOrigin / scale + rayDirBias);
+    vec3 sideDist = ((cellPos - cellRayOrigin) + scale * (0.5 + raySign * 0.5)) * rayInvDir;
+    sideDist = mix(vec3(INFINITY), sideDist, rayDirMask);
 
     for (int i = 0; i < MAX_ITERATIONS; i++)
     {
-        incr = GetStepMask(sideDist) * ray.signDir;
-        mapPos += incr;
+        vec3 cellIndex = floor((cellPos - nodePos) / scale);
 
-        uint voxel = GetVoxel(tree, mapPos);
-        if (voxel > 0)
+        if (all(greaterThanEqual(cellIndex, vec3(0))) && all(lessThan(cellIndex, vec3(4))))
         {
-            color = hsv2rgb(vec3(float(voxel) / 255.0, 1.0, 1.0));
-            break;
+            uint index = uint(dot(cellIndex, vec3(1, 4, 16)));
+
+            while (!SV_IsLeaf(node) && SV_IsOccupied(node, index))
+            {
+                stack[level].nodePtr = nodePtr;
+                stack[level].nodePos = nodePos;
+                level -= 1;
+
+                uint childPtr = SV_GetChild(node, index);
+                node = tree.pNodes.v[childPtr];
+                nodePtr = childPtr;
+                nodePos = cellPos;
+                scale /= 4;
+
+                cellPos = scale * floor(cellRayOrigin / scale + rayDirBias);
+                sideDist = ((cellPos - cellRayOrigin) + scale * (0.5 + raySign * 0.5)) * rayInvDir;
+                sideDist = mix(vec3(INFINITY), sideDist, rayDirMask);
+                nodeRayOrigin = cellRayOrigin;
+
+                cellIndex = floor((cellPos - nodePos) / scale);
+                index = uint(dot(cellIndex, vec3(1, 4, 16)));
+            }
+
+            if (index >= 64)
+            {
+                color = vec4(1.0, 0.0, 1.0, 1.0);
+                break;
+            }
+
+            if (SV_IsLeaf(node) && SV_IsOccupied(node, index))
+            {   
+                //color = vec4(1.0, 0.0, 0.0, 1.0);
+                color = vec4((vec3(0.25) + cellIndex / 4.0), 1.0);
+                break;
+            }
         }
-        sideDist += incr * ray.invDir;
+        else
+        {
+            if (level >= (tree.depth - 1))
+                break;
+
+            level += 1;
+            uint parentPtr = stack[level].nodePtr;
+            node = tree.pNodes.v[parentPtr];
+            nodePos = stack[level].nodePos;
+            nodePtr = parentPtr;
+
+            scale *= 4;
+
+            cellPos = scale * floor(cellRayOrigin / scale + rayDirBias);
+            sideDist = ((cellPos - cellRayOrigin) + scale * (0.5 + raySign * 0.5)) * rayInvDir;
+            sideDist = mix(vec3(INFINITY), sideDist, rayDirMask);
+            nodeRayOrigin = cellRayOrigin;
+
+            continue;    
+        }
+
+        float minSideDist = min(min(sideDist.x, sideDist.y), sideDist.z);
+        cellRayOrigin = nodeRayOrigin + minSideDist * rayDir;
+
+        vec3 incr = GetStepMask(sideDist) * raySign * scale;
+        cellPos += incr;
+        sideDist += incr * sideDistStep;
     }
 
-    vec3 normal = -incr;
-
-    // Ambient lighting
-    vec3 ambient = vec3(0.5) * dot(abs(incr), vec3(0.5, 1.0, 0.75));
-
-    return color * ambient;
+    return color;
 }

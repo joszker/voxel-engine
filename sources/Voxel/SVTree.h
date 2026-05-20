@@ -30,7 +30,7 @@ struct VoxelArray
 
 /*
     Sparse voxel tree child reference.
-*/
+
 struct SVChild
 {
     size_t idx;
@@ -41,7 +41,7 @@ struct SVChild
 
     operator bool () const { return idx != INVALID; }
 };
-
+*/
 
 
 /*
@@ -72,27 +72,41 @@ struct SVNode
         return (ChildMask >> index) & 1 == 1; 
     }
 
-    inline SVChild Get(uint index) const
+
+    inline uintptr_t GetChildPtr(uint index) const
     {
-        // Example:
-        //
-        // mask = 00000010000011000001000101
+        // ChildMask = 00000010000011000001000101
         //              ^     ^^     ^   ^ ^
         //              5     43     2   1 0
+        ASSERT(index < 64);
+        return u64(ChildrenPtr) + popcnt64(ChildMask & ((1ull << index) - 1));
+    }
 
+    inline const SVNode *Get(uint index, const SVNode *nodes) const
+    {
         if (index >= 64 || !IsOccupied(index))
         {
-            return {};
+            return nullptr;
         }
 
-        return ChildrenPtr + popcnt64(ChildMask & ((1ull << index) - 1));
+        return nodes + GetChildPtr(index);
     }
-
-    inline SVChild Get(Vec3u index) const
+    inline const SVNode *Get(Vec3u index, const SVNode *nodes) const
     {
-        return Get(Index1DFrom3D(index));
+        return Get(Index1DFrom3D(index), nodes);
     }
 
+    inline Voxel GetVoxel(uint index, const Voxel *voxels) const
+    {
+        if (index >= 64 || !IsOccupied(index))
+            return {};
+
+        return voxels[GetChildPtr(index)];
+    }
+    inline Voxel GetVoxel(Vec3u index, const Voxel *voxels) const
+    {
+        return GetVoxel(Index1DFrom3D(index), voxels);
+    }
 
     static Vec3u Index3DFrom1D(u32 index)
     {
@@ -130,6 +144,8 @@ public:
     SVNode GetRoot() const;
     std::span<SVNode> GetNodes();
     std::span<Voxel> GetVoxels();
+    std::span<const SVNode> GetNodes() const;
+    std::span<const Voxel> GetVoxels() const;
 
     Voxel Get(Vec3u index) const;
 

@@ -129,6 +129,16 @@ std::span<Voxel> SVTree::GetVoxels()
     return { m_voxels.data(), m_voxels.size() };
 }
 
+std::span<const SVNode> SVTree::GetNodes() const
+{
+    return { m_nodes.data(), m_nodes.size() };
+}
+
+std::span<const Voxel> SVTree::GetVoxels() const
+{
+    return { m_voxels.data(), m_voxels.size() };
+}
+
 
 Voxel SVTree::Get(Vec3u index) const
 {
@@ -138,9 +148,9 @@ Voxel SVTree::Get(Vec3u index) const
     while (!node.IsLeaf)
     {
         Vec3u nodeIndex = index / scale;
-        if (SVChild child = node.Get(nodeIndex))
+        if (auto *child = node.Get(nodeIndex, m_nodes.data()))
         {
-            node = m_nodes[child.idx];
+            node = *child;
             index -= nodeIndex * scale;
             scale /= 4;
         }
@@ -151,10 +161,5 @@ Voxel SVTree::Get(Vec3u index) const
     }
 
     ASSERT(scale == 1);
-    if (SVChild child = node.Get(index))
-    {
-        return m_voxels[child.idx];
-    }
-
-    return Voxel{};
+    return node.GetVoxel(index, m_voxels.data());
 }

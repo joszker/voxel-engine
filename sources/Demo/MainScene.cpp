@@ -12,6 +12,9 @@
 
 #include "Voxel/SVTree.h"
 
+#define OGT_VOX_IMPLEMENTATION
+#include "3rdparty/ogt_vox.h"
+
 struct GPU_SVTree
 {
     Vec3i dimensions;
@@ -37,46 +40,187 @@ struct PerFrameData
 };
 
 
+Vec3 GetStepMask(Vec3 sideDist)
+{
+    glm::bvec3 mask;
+    glm::bvec3 prio = glm::lessThan(sideDist, Vec3(sideDist.y, sideDist.z, sideDist.x));
+
+    mask.x = prio.x && !prio.z;       // (T.x < T.y) && (T.x <= T.z)
+    mask.y = prio.y && !prio.x;       // (T.y < T.z) && (T.y <= T.x)
+    mask.z = !(mask.x || mask.y);
+
+    return Vec3(mask);
+}
+
+
+Vec4 Trace(const SVTree& tree, Vec3 rayOrigin, Vec3 rayDir)
+{
+    rayDir = glm::normalize(rayDir);
+
+    Vec4 color(0.0f);
+
+    struct
+    {
+        u32 nodePtr;
+        Vec3 nodePos;
+
+    } stack[23];
+
+    const Vec3 rayInvDir = 1.0f / rayDir;
+    const Vec3 raySign = glm::sign(rayDir);
+    const glm::bvec3 rayDirMask = glm::notEqual(rayDir, Vec3(0.0f));
+    const Vec3 rayDirBias = Vec3(1e-4) * raySign;
+
+    const Vec3 sideDistStep = glm::mix(Vec3(0.0f), rayInvDir, rayDirMask);
+
+    /* ray aabb collision */
+    Vec3 cellRayOrigin;
+    {
+        const Vec3 tMin = -rayOrigin * rayInvDir;
+        const Vec3 tMax = (Vec3(tree.GetDimensions()) - rayOrigin) * rayInvDir;
+        const Vec3 t1 = glm::min(tMin, tMax);
+        const Vec3 t2 = glm::max(tMin, tMax);
+        const float tNear = glm::max(glm::max(t1.x, t1.y), t1.z);
+        const float tFar = glm::min(glm::min(t2.x, t2.y), t2.z);
+
+        if (tNear > tFar || tFar < 0.0)
+            return Vec4(0); 
+
+        cellRayOrigin = rayOrigin + glm::max(tNear, 0.0f) * rayDir;
+        cellRayOrigin = glm::clamp(cellRayOrigin, Vec3(0), Vec3(tree.GetDimensions()));
+    }
+    Vec3 nodeRayOrigin = cellRayOrigin;
+
+    f32 scale = f32(pow4(tree.GetDepth() - 1));
+    Vec3 cellPos = scale * glm::floor((cellRayOrigin) / scale + rayDirBias);
+    Vec3 sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
+
+    uint level = tree.GetDepth() - 1;
+    SVNode node = tree.GetRoot();
+    u32 nodePtr = 0;
+    Vec3 nodePos = Vec3(0.0f);
+
+    for (int i = 0; i < 255; i++)
+    {
+        LOG_TRACE("{}[{},{},{}] | {}, {}, {}  ---  ({}, {}, {})", scale, nodePos.x, nodePos.y, nodePos.z, cellPos.x, cellPos.y, cellPos.z, cellRayOrigin.x, cellRayOrigin.y, cellRayOrigin.z);
+
+        Vec3 cellIndex = glm::floor((cellPos - nodePos) / scale);
+
+        if (glm::all(glm::greaterThanEqual(cellIndex, Vec3(0))) && glm::all(glm::lessThan(cellIndex, Vec3(4))))
+        {
+            uint childIndex = uint(glm::dot(cellIndex, Vec3(1, 4, 16)));
+
+            while (!node.IsLeaf && node.IsOccupied(childIndex))
+            {
+                // Save node
+                stack[level].nodePtr = nodePtr;
+                stack[level].nodePos = nodePos;
+                level -= 1;
+
+                u32 childPtr = node.GetChildPtr(childIndex);
+                node = tree.GetNodes()[childPtr];
+                nodePtr = childPtr;
+                nodePos = cellPos;
+                scale /= 4;
+
+                cellPos = scale * glm::floor((cellRayOrigin / scale + rayDirBias));
+                sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
+                sideDist = glm::mix(Vec3(glm::uintBitsToFloat(0x7F800000)), sideDist, rayDirMask);
+                nodeRayOrigin = cellRayOrigin;
+
+                cellIndex = glm::floor((cellPos - nodePos) / scale);
+                childIndex = uint(glm::dot(cellIndex, Vec3(1, 4, 16)));
+
+                LOG_TRACE("{}[{},{},{}] | {}, {}, {}  ---  ({}, {}, {})", scale, nodePos.x, nodePos.y, nodePos.z, cellPos.x, cellPos.y, cellPos.z, cellRayOrigin.x, cellRayOrigin.y, cellRayOrigin.z);
+            }
+
+            if (node.IsLeaf && node.IsOccupied(childIndex))
+            {
+                //color = Vec4(1.0, 0.0, 0.0, 1.0);
+                color = Vec4(cellPos, 1.0);
+                break;
+            }
+        }
+        else
+        {
+            if (level >= tree.GetDepth() - 1)
+                break;
+
+            level += 1;
+            nodePtr = stack[level].nodePtr;
+            node = tree.GetNodes()[nodePtr];
+            nodePos = stack[level].nodePos;
+
+            scale *= 4;
+            cellPos = scale * glm::floor((cellRayOrigin + 0.0f) / scale + rayDirBias);
+            sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
+            sideDist = glm::mix(Vec3(glm::uintBitsToFloat(0x7F800000)), sideDist, rayDirMask);
+            nodeRayOrigin = cellRayOrigin;
+
+            continue;
+        }
+
+        f32 minSideDist = glm::min(glm::min(sideDist.x, sideDist.y), sideDist.z);
+        cellRayOrigin = nodeRayOrigin + minSideDist * rayDir;
+
+        Vec3 step = GetStepMask(sideDist) * raySign * scale;
+        cellPos += step;
+        sideDist += step * sideDistStep;
+    }
+
+    LOG_TRACE("==============================================");
+
+    return color;
+}
+
 
 void MainScene::OnAttach()
 {
-    /*
-    std::vector<Voxel> voxels = {
-        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
-
-        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 0 }, Voxel { 0 }, Voxel { 1 },
-        Voxel { 1 }, Voxel { 1 }, Voxel { 1 }, Voxel { 1 },
-    };*/
-    const int h = 63;
-    const int w = 63;
-    std::vector<Voxel> voxels;
-    voxels.resize(w * h * 1);
-
-    for (int y = 0; y < h; y++)
+    auto voxData = FileSystem::ReadFile("data/Winter_Tree.vox");
+    if (voxData)
     {
-        for (int x = 0; x < w; x++)
+        auto *scene = ogt_vox_read_scene(voxData->data(), voxData->size());
+        auto *model = scene->models[0];
+
+        VoxelArray voxels{};
+        voxels.Size = Vec3u(model->size_x, model->size_y, model->size_z);
+
+        size_t size = model->size_x * model->size_y * model->size_z;
+        for (size_t i = 0; i < size; i++)
+            voxels.Data.push_back(Voxel{ model->voxel_data[i] });
+
+        m_svt = SVTree(voxels);
+    }
+    else
+    {
+        const int h = 63;
+        const int w = 63;
+        std::vector<Voxel> voxels;
+        voxels.resize(w * h * 1);
+
+        for (int y = 0; y < h; y++)
         {
-            float d = glm::distance(Vec2(float(x)/w, float(y)/h), Vec2(0.5));
-            if (d <= 0.5f)
-                voxels[y * w + x] = Voxel { u8((2 * d * 255)) };
-            else
-                voxels[y * w + x] = Voxel { 0 };
+            for (int x = 0; x < w; x++)
+            {
+                float d = glm::distance(Vec2(float(x)/w, float(y)/h), Vec2(0.5));
+                if (d <= 0.5f)
+                    voxels[y * w + x] = Voxel { u8((2 * d * 255)) };
+                else
+                    voxels[y * w + x] = Voxel { 0 };
+            }
         }
+
+        m_svt = SVTree({ voxels, Vec3u(w, h, 1) });
     }
 
-    m_svt = SVTree({ voxels, Vec3u(w, h, 1) });
+    //Trace(m_svt, Vec3(0.5, 5.5, 38.0), Vec3(0.0, 0.0, -1.0f));
 
-    m_camera.pos = Vec3(0.0f, 0.0f, -12.0f);
+    m_camera.pos = Vec3(0.0f, 0.0f, 0.0f);
     m_camera.yaw = glm::half_pi<f32>();
     m_camera.dir = {
         cos(m_camera.yaw) * cos(m_camera.pitch),
-        sin(m_camera.pitch),
         sin(m_camera.yaw) * cos(m_camera.pitch),
+        sin(m_camera.pitch),
     };
     m_camera.active = true;
 
@@ -191,7 +335,7 @@ void MainScene::OnAttach()
 
     /* Storage buffers */
     {
-        const size_t size = 10 * 1024;
+        const size_t size = 20 * 1024 * 1024;
 
         m_svtBuffer.gpu = m_device->CreateBuffer({
             .Size = size,
@@ -219,13 +363,29 @@ void MainScene::OnDetach()
 
 void MainScene::OnUpdate(f32 dt)
 {
+
+    {
+        const Vec3 rayOrigin = m_camera.pos;
+        const Vec3 rayInvDir = 1.0f / glm::normalize(m_camera.dir);
+
+        const Vec3 tMin = (-rayOrigin) * rayInvDir;
+        const Vec3 tMax = (Vec3(m_svt.GetDimensions()) - rayOrigin) * rayInvDir;
+        const Vec3 t1 = glm::min(tMin, tMax);
+        const Vec3 t2 = glm::max(tMin, tMax);
+        const float tNear = glm::max(glm::max(t1.x, t1.y), t1.z);
+        const float tFar = glm::min(glm::min(t2.x, t2.y), t2.z);
+
+        //LOG_TRACE("{} | {} | {}", tNear, tFar, tNear < 0.0f && tFar > 0.0f);
+        //LOG_TRACE("{} | {}", tNear, tFar);
+    }
+
     Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
     auto* frameData = reinterpret_cast<PerFrameData*>(frame.perFrameData.GetMapped());
 
-    const Vec3 unitY = Vec3(0.0f, 1.0f, 0.0f);
+    const Vec3 upAxis = Vec3(0.0f, 0.0f, 1.0f);
 
-    const Vec3 cameraRight = glm::normalize(glm::cross(unitY, m_camera.dir));
-    const Vec3 cameraUp = glm::cross(m_camera.dir, cameraRight);
+    const Vec3 cameraRight = -glm::normalize(glm::cross(upAxis, m_camera.dir));
+    const Vec3 cameraUp = -glm::cross(m_camera.dir, cameraRight);
 
 
     if (m_camera.active)
@@ -252,7 +412,7 @@ void MainScene::OnUpdate(f32 dt)
         if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_LEFT_SHIFT))
             upward = -1.0f;
 
-        m_camera.pos += 10.0f * (forward * m_camera.dir + right * cameraRight + upward * unitY) * dt;
+        m_camera.pos += 10.0f * (forward * m_camera.dir + right * cameraRight + upward * upAxis) * dt;
     }
 
 
@@ -269,13 +429,30 @@ void MainScene::OnUpdate(f32 dt)
     frameData->CameraDir = Vec4(m_camera.dir, 0.0f);
     frameData->CameraRight = Vec4(cameraRight, 0.0f);
     frameData->CameraUp = Vec4(cameraUp, 0.0f);
-    
+
+#if 0    
     ImGui::Begin("Uniforms");
     ImGui::ColorEdit3("Voxel color", &frameData->Color.x);
     ImGui::SliderFloat3("Light position", &frameData->LightPos.x, -50.0f, +50.0f);
     ImGui::ColorEdit3("Light color", &frameData->LightColor.x);
     ImGui::ColorEdit3("Ambient color", &frameData->Ambient.x);
     ImGui::End();
+#endif
+
+    {
+        auto imViewport = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(imViewport->WorkPos, ImGuiCond_Always);
+
+        auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+        ImGui::Begin("overlay", 0, flags);
+
+        ImGui::Text("X: %.3f", m_camera.pos.x);
+        ImGui::Text("Y: %.3f", m_camera.pos.y);
+        ImGui::Text("Z: %.3f", m_camera.pos.z);
+
+        ImGui::End();
+    }
+
 
     ImGui::Render();
 
@@ -291,11 +468,16 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
     Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
 
 
-    if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_T))
+    if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_T) == GLFW_PRESS)
     {
         m_swapChain->WaitForPreviousFrames();
       
-        byte data[10 * 1024] = {};
+
+
+        constexpr size_t k_dataSize = 20 * 1024 * 1024;
+        static byte *data = nullptr;
+        if (!data) data = new byte[k_dataSize];
+
         {
             auto srcNodes = m_svt.GetNodes();
             auto srcVoxels = m_svt.GetVoxels();
@@ -305,9 +487,11 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
 
             memcpy(dstNodes, srcNodes.data(), sizeof(SVNode) * srcNodes.size());
             memcpy(dstVoxels, srcVoxels.data(), sizeof(Voxel) * srcVoxels.size());
-        }
 
-        m_device->Write(m_svtBuffer.cpu, 0, data, sizeof(data));
+            m_device->Write(m_svtBuffer.cpu, 0, data, k_dataSize);
+        }
+        //delete[] data;
+       
 
         cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
 
@@ -417,6 +601,13 @@ bool MainScene::OnKeyEvent(int key, int scancode, int action)
         else    
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
+
+    if (key == GLFW_KEY_R && action == GLFW_PRESS)
+    {
+        Vec4 result = Trace(m_svt, m_camera.pos, m_camera.dir);
+
+        //LOG_TRACE("Ray trace: {}, {}, {}, {}", result.x, result.y, result.z, result.w);
+    }
     return false;
 }
 
@@ -437,8 +628,8 @@ void MainScene::OnMouseMovedEvent(Vec2 pos)
 
         Vec3 direction {
             cos(m_camera.yaw) * cos(m_camera.pitch),
-            sin(m_camera.pitch),
             sin(m_camera.yaw) * cos(m_camera.pitch),
+            sin(m_camera.pitch),
         };
         m_camera.dir = direction;
     }
