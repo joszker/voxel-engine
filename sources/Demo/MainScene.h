@@ -32,6 +32,7 @@ private:
 
 private:
     Pipeline m_primaryPass{};
+    Pipeline m_denoisingPass{};
     Pipeline m_compositePass{};
 
     VkSampler m_sampler{};
@@ -45,12 +46,22 @@ private:
         Buffer cpu;     // cpu staging buffer
     } m_svtBuffer;
 
+    Image m_stbnImage;
+
+    Buffer m_vhmBuffer;
+    VkDeviceAddress m_prevVHM;
+    VkDeviceAddress m_currentVHM;
+
+
     struct Frame
     {
         Buffer perFrameData;    // Uniform buffer written every frame
         VkDescriptorSet descriptorSet{};
 
-        Image primaryImage;
+        //Image primaryImage;
+
+        Image voxelImage;
+        Image normalImage;
     };
     std::vector<Frame> m_frames;
 
@@ -64,4 +75,10 @@ private:
         f32 yaw;
         f32 pitch;
     } m_camera{};
+
+
+    uint m_fps;
+    uint m_frameCounter;
+    f64 m_prevFpsTime;
+    uint m_frameNum = 0;
 };

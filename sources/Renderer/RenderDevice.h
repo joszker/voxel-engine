@@ -4,6 +4,24 @@
 #include "Buffer.h"
 
 
+class CommandBuffer;
+
+
+struct SubmitInfo
+{
+    /* Semaphores upon which to wait before executing */
+    VkSemaphore Wait{};
+
+    /* Stage at which to wait */
+    VkPipelineStageFlags WaitStage{};
+
+    /* Semaphore to be signaled when execution is completed */
+    VkSemaphore Signal{};
+
+    /* Fence to be signaled when execution is completed */
+    //VkFence SignalFence{};
+};
+
 
 class RenderDevice
 {
@@ -28,9 +46,11 @@ public:
 
     Buffer CreateBuffer(const BufferDesc& desc);
     void DestroyBuffer(const Buffer& buffer);
+    void Write(Buffer *buffer, size_t dstOffset, const void *src, size_t numBytes);
 
-    void Write(Buffer& buffer, size_t dstOffset, const void *src, size_t numBytes);
-
+    void Submit(std::function<void(CommandBuffer)> callback, const SubmitInfo& submit = {});
+    void UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout, VkImageSubresourceLayers subresLayers);
+    void UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout);
 
     inline VkInstance GetInstance() const { return m_instance; }
     inline VkSurfaceKHR GetSurface() const { return m_surface; }
@@ -63,6 +83,8 @@ private:
         void*                                       pUserData
     ); 
 
+    bool hasDedicatedTransferQueue() { return m_graphicsQueue != m_transferQueue; }
+
 
 private:
     VkInstance m_instance{};
@@ -72,13 +94,16 @@ private:
     VkDevice m_device{};
     uint32_t m_presentQueueFamily;
     uint32_t m_graphicsQueueFamily;
-    uint32_t m_computeQueueFamily;
     uint32_t m_transferQueueFamily;
     VkQueue m_presentQueue{};
     VkQueue m_graphicsQueue{};
+    VkQueue m_transferQueue{};          // NOTE: can be same as `m_graphicsQueue`
 
     VmaAllocator m_allocator;
     VkCommandPool m_graphicsCmdPool;
+    VkCommandPool m_transferCmdPool;    // NOTE: can be same as `m_graphicsCmdPool`
+    VkCommandBuffer m_transferCmdBuffer;
+    VkFence m_transferPending;
     
     #if 0
     VkSwapchainKHR m_swapChain{};

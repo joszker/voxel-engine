@@ -9,211 +9,114 @@
 #include <backends/imgui_impl_vulkan.h>
 #include <GLFW/glfw3.h>
 #include <glm/gtc/constants.hpp>
+#include <glm/gtx/bit.hpp>
 
 #include "Voxel/SVTree.h"
 
 #define OGT_VOX_IMPLEMENTATION
 #include "3rdparty/ogt_vox.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "3rdparty/stb_image.h"
+
 struct GPU_SVTree
 {
-    Vec3i dimensions;
     u32 root;
     u32 depth;
     VkDeviceAddress nodes;      // SVNode*
     VkDeviceAddress voxels;     // Voxel* 
 };
 
-struct PerFrameData
+#define VHM_SIZE            16777216
+#define VHM_BUFFER_SIZE     (VHM_SIZE * 20)
+
+struct GPU_VoxelHashMap
 {
-    Vec4 Resolution;
-    Vec4 Color;
-    Vec4 LightPos;
-    Vec4 LightColor;
-    Vec4 Ambient;
+    VkDeviceAddress keys;
+    VkDeviceAddress values;
+};
+
+struct PushConstants
+{
     Vec4 CameraPos;
     Vec4 CameraDir;
-    Vec4 CameraRight;
-    Vec4 CameraUp;
+    Vec2 Resolution;
+    u32 FrameNo;
 
-    GPU_SVTree Map;
+    GPU_SVTree VoxelMap;
+    GPU_VoxelHashMap CurrentVHM;
+    GPU_VoxelHashMap PrevVHM;
 };
 
 
-Vec3 GetStepMask(Vec3 sideDist)
-{
-    glm::bvec3 mask;
-    glm::bvec3 prio = glm::lessThan(sideDist, Vec3(sideDist.y, sideDist.z, sideDist.x));
-
-    mask.x = prio.x && !prio.z;       // (T.x < T.y) && (T.x <= T.z)
-    mask.y = prio.y && !prio.x;       // (T.y < T.z) && (T.y <= T.x)
-    mask.z = !(mask.x || mask.y);
-
-    return Vec3(mask);
-}
 
 
-Vec4 Trace(const SVTree& tree, Vec3 rayOrigin, Vec3 rayDir)
-{
-    rayDir = glm::normalize(rayDir);
-
-    Vec4 color(0.0f);
-
-    struct
-    {
-        u32 nodePtr;
-        Vec3 nodePos;
-
-    } stack[23];
-
-    const Vec3 rayInvDir = 1.0f / rayDir;
-    const Vec3 raySign = glm::sign(rayDir);
-    const glm::bvec3 rayDirMask = glm::notEqual(rayDir, Vec3(0.0f));
-    const Vec3 rayDirBias = Vec3(1e-4) * raySign;
-
-    const Vec3 sideDistStep = glm::mix(Vec3(0.0f), rayInvDir, rayDirMask);
-
-    /* ray aabb collision */
-    Vec3 cellRayOrigin;
-    {
-        const Vec3 tMin = -rayOrigin * rayInvDir;
-        const Vec3 tMax = (Vec3(tree.GetDimensions()) - rayOrigin) * rayInvDir;
-        const Vec3 t1 = glm::min(tMin, tMax);
-        const Vec3 t2 = glm::max(tMin, tMax);
-        const float tNear = glm::max(glm::max(t1.x, t1.y), t1.z);
-        const float tFar = glm::min(glm::min(t2.x, t2.y), t2.z);
-
-        if (tNear > tFar || tFar < 0.0)
-            return Vec4(0); 
-
-        cellRayOrigin = rayOrigin + glm::max(tNear, 0.0f) * rayDir;
-        cellRayOrigin = glm::clamp(cellRayOrigin, Vec3(0), Vec3(tree.GetDimensions()));
-    }
-    Vec3 nodeRayOrigin = cellRayOrigin;
-
-    f32 scale = f32(pow4(tree.GetDepth() - 1));
-    Vec3 cellPos = scale * glm::floor((cellRayOrigin) / scale + rayDirBias);
-    Vec3 sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
-
-    uint level = tree.GetDepth() - 1;
-    SVNode node = tree.GetRoot();
-    u32 nodePtr = 0;
-    Vec3 nodePos = Vec3(0.0f);
-
-    for (int i = 0; i < 255; i++)
-    {
-        LOG_TRACE("{}[{},{},{}] | {}, {}, {}  ---  ({}, {}, {})", scale, nodePos.x, nodePos.y, nodePos.z, cellPos.x, cellPos.y, cellPos.z, cellRayOrigin.x, cellRayOrigin.y, cellRayOrigin.z);
-
-        Vec3 cellIndex = glm::floor((cellPos - nodePos) / scale);
-
-        if (glm::all(glm::greaterThanEqual(cellIndex, Vec3(0))) && glm::all(glm::lessThan(cellIndex, Vec3(4))))
-        {
-            uint childIndex = uint(glm::dot(cellIndex, Vec3(1, 4, 16)));
-
-            while (!node.IsLeaf && node.IsOccupied(childIndex))
-            {
-                // Save node
-                stack[level].nodePtr = nodePtr;
-                stack[level].nodePos = nodePos;
-                level -= 1;
-
-                u32 childPtr = node.GetChildPtr(childIndex);
-                node = tree.GetNodes()[childPtr];
-                nodePtr = childPtr;
-                nodePos = cellPos;
-                scale /= 4;
-
-                cellPos = scale * glm::floor((cellRayOrigin / scale + rayDirBias));
-                sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
-                sideDist = glm::mix(Vec3(glm::uintBitsToFloat(0x7F800000)), sideDist, rayDirMask);
-                nodeRayOrigin = cellRayOrigin;
-
-                cellIndex = glm::floor((cellPos - nodePos) / scale);
-                childIndex = uint(glm::dot(cellIndex, Vec3(1, 4, 16)));
-
-                LOG_TRACE("{}[{},{},{}] | {}, {}, {}  ---  ({}, {}, {})", scale, nodePos.x, nodePos.y, nodePos.z, cellPos.x, cellPos.y, cellPos.z, cellRayOrigin.x, cellRayOrigin.y, cellRayOrigin.z);
-            }
-
-            if (node.IsLeaf && node.IsOccupied(childIndex))
-            {
-                //color = Vec4(1.0, 0.0, 0.0, 1.0);
-                color = Vec4(cellPos, 1.0);
-                break;
-            }
-        }
-        else
-        {
-            if (level >= tree.GetDepth() - 1)
-                break;
-
-            level += 1;
-            nodePtr = stack[level].nodePtr;
-            node = tree.GetNodes()[nodePtr];
-            nodePos = stack[level].nodePos;
-
-            scale *= 4;
-            cellPos = scale * glm::floor((cellRayOrigin + 0.0f) / scale + rayDirBias);
-            sideDist = ((cellPos - cellRayOrigin) + scale * (0.5f + raySign * 0.5f)) * rayInvDir;
-            sideDist = glm::mix(Vec3(glm::uintBitsToFloat(0x7F800000)), sideDist, rayDirMask);
-            nodeRayOrigin = cellRayOrigin;
-
-            continue;
-        }
-
-        f32 minSideDist = glm::min(glm::min(sideDist.x, sideDist.y), sideDist.z);
-        cellRayOrigin = nodeRayOrigin + minSideDist * rayDir;
-
-        Vec3 step = GetStepMask(sideDist) * raySign * scale;
-        cellPos += step;
-        sideDist += step * sideDistStep;
-    }
-
-    LOG_TRACE("==============================================");
-
-    return color;
-}
 
 
 void MainScene::OnAttach()
 {
-    auto voxData = FileSystem::ReadFile("data/Winter_Tree.vox");
+    auto voxData = FileSystem::ReadFile("data/room.vox");
     if (voxData)
     {
         auto *scene = ogt_vox_read_scene(voxData->data(), voxData->size());
+
+#if 1
+        Vec3i boundsMin(INT32_MAX), boundsMax(INT32_MIN);
+
+        for (uint32_t i = 0; i < scene->num_instances; i++)
+        {
+            auto *instance = scene->instances + i;
+            auto *model = scene->models[instance->model_index];
+
+            Vec3i position = Vec3(instance->transform.m30, instance->transform.m31, instance->transform.m32);
+            Vec3i size = Vec3(model->size_x, model->size_y, model->size_z);
+
+            boundsMin = glm::min(boundsMin, Vec3i(glm::floor(Vec3(position) - Vec3(size) / 2.0f)));
+            boundsMax = glm::max(boundsMax, Vec3i(glm::ceil(Vec3(position) + Vec3(size) / 2.0f)));
+        }
+
+        Vec3u sceneSize = boundsMax - boundsMin;
+        VoxelArray voxels{};
+        voxels.Init(sceneSize);
+
+        for (uint32_t i = 0; i < scene->num_instances; i++)
+        {
+            auto *instance = scene->instances + i;
+            auto *model = scene->models[instance->model_index];
+
+            Vec3i size = Vec3(model->size_x, model->size_y, model->size_z);
+            Vec3i position = Vec3(instance->transform.m30, instance->transform.m31, instance->transform.m32) - Vec3(size / 2);
+            
+            for (u32 z = 0; z < size.z; z++)
+            {
+                for (u32 y = 0; y < size.y; y++)
+                {
+                    const uint8_t *srcVoxels = &model->voxel_data[z * (size.x * size.y) + y * size.x];
+
+                    Vec3u pos = (position + Vec3i(0, y, z)) - boundsMin;
+                    
+                    memcpy(&voxels.Data[pos.z * (voxels.Size.x * voxels.Size.y) + pos.y * voxels.Size.x + pos.x], srcVoxels, size.x * sizeof(Voxel));
+                }
+            }
+        }
+#else
+
         auto *model = scene->models[0];
 
         VoxelArray voxels{};
         voxels.Size = Vec3u(model->size_x, model->size_y, model->size_z);
 
         size_t size = model->size_x * model->size_y * model->size_z;
-        for (size_t i = 0; i < size; i++)
-            voxels.Data.push_back(Voxel{ model->voxel_data[i] });
+
+        voxels.Data.resize(size);
+        memcpy(voxels.Data.data(), model->voxel_data, sizeof(Voxel) * size);
+        //for (size_t i = 0; i < size; i++)
+        //    voxels.Data.push_back(Voxel{ model->voxel_data[i] });
+#endif
 
         m_svt = SVTree(voxels);
     }
-    else
-    {
-        const int h = 63;
-        const int w = 63;
-        std::vector<Voxel> voxels;
-        voxels.resize(w * h * 1);
 
-        for (int y = 0; y < h; y++)
-        {
-            for (int x = 0; x < w; x++)
-            {
-                float d = glm::distance(Vec2(float(x)/w, float(y)/h), Vec2(0.5));
-                if (d <= 0.5f)
-                    voxels[y * w + x] = Voxel { u8((2 * d * 255)) };
-                else
-                    voxels[y * w + x] = Voxel { 0 };
-            }
-        }
-
-        m_svt = SVTree({ voxels, Vec3u(w, h, 1) });
-    }
-
-    //Trace(m_svt, Vec3(0.5, 5.5, 38.0), Vec3(0.0, 0.0, -1.0f));
 
     m_camera.pos = Vec3(0.0f, 0.0f, 0.0f);
     m_camera.yaw = glm::half_pi<f32>();
@@ -260,10 +163,11 @@ void MainScene::OnAttach()
     DescriptorLayout layout;
     {
         DescriptorLayoutBuilder layoutBuilder;
-        layoutBuilder.Add(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
-        layoutBuilder.Add(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER);
+        //layoutBuilder.Add(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+        layoutBuilder.Add(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        layoutBuilder.Add(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        layout = layoutBuilder.Build(*m_device);
+        layout = layoutBuilder.Build(*m_device, VK_SHADER_STAGE_ALL);
     }
 
 
@@ -273,26 +177,6 @@ void MainScene::OnAttach()
         m_frames.resize(m_swapChain->GetFrameCount());
         for (Frame& frame : m_frames)
         {
-            frame.perFrameData = m_device->CreateBuffer({
-                .Size = sizeof(PerFrameData),
-                .Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                .AllocFlags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
-                .RequiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
-            });
-
-            auto* frameData = reinterpret_cast<PerFrameData*>(frame.perFrameData.GetMapped());
-
-            memset(frameData, 0, sizeof(frameData));
-            frameData->Color[0] = frameData->Color[1] = frameData->Color[2] = 0.65f;
-            frameData->CameraPos = Vec4(m_camera.pos, 0.0f);
-            frameData->CameraDir = Vec4(m_camera.dir, 0.0f);
-
-            frameData->LightPos = Vec4(10.0f, 10.0f, -3.0f, 1.0f);
-            frameData->LightColor = Vec4(0.7f, 0.7f, 1.0f, 1.0f);
-            frameData->Ambient = Vec4(0.2f, 0.2f, 0.2f, 1.0f);
-            
-
-
             descriptorAlloc.Add(&layout, &frame.descriptorSet);
         }
 
@@ -303,7 +187,8 @@ void MainScene::OnAttach()
     /* Load shaders */
     VkShaderModule fullscreenShader = loadShader("data/shaders/fullscreen.vert.spv");
     VkShaderModule primaryShader = loadShader("data/shaders/primary.frag.spv");
-    VkShaderModule compositeShader = loadShader("data/shaders/trace.frag.spv");
+    VkShaderModule compositeShader = loadShader("data/shaders/composite.frag.spv");
+    VkShaderModule denoisingShader = loadShader("data/shaders/denoise.comp.spv");
 
     /* Create primary pipeline */
     {
@@ -311,8 +196,15 @@ void MainScene::OnAttach()
 
         pipelineBuilder.AddVertexShader(fullscreenShader);
         pipelineBuilder.AddFragmentShader(primaryShader);
-        pipelineBuilder.AddColorAttachment({ m_frames[0].primaryImage.GetFormat() });
+        //pipelineBuilder.AddColorAttachment({ m_frames[0].primaryImage.GetFormat() });
+        pipelineBuilder.AddColorAttachment({ m_frames[0].voxelImage.GetFormat() });
+        pipelineBuilder.AddColorAttachment({ m_frames[0].normalImage.GetFormat() });        
+
         pipelineBuilder.AddDescriptorLayout(layout);
+        pipelineBuilder.AddPushConstantRange({
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+            .size = sizeof(PushConstants),
+        });
 
         m_primaryPass = pipelineBuilder.Build(*m_device);
     }
@@ -325,8 +217,28 @@ void MainScene::OnAttach()
         pipelineBuilder.AddFragmentShader(compositeShader);
         pipelineBuilder.AddColorAttachment({ m_swapChain->GetImageFormat() });
         pipelineBuilder.AddDescriptorLayout(layout);
+        pipelineBuilder.AddPushConstantRange({
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+            .size = sizeof(PushConstants),
+        });
 
         m_compositePass = pipelineBuilder.Build(*m_device);
+    }
+
+    {
+        std::array pcRanges = {
+            VkPushConstantRange {
+                .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+                .size = sizeof(PushConstants),
+            },
+        };
+        
+        ComputePipelineDesc desc = {
+            .ShaderModule = denoisingShader,
+            .PushConstantRanges = pcRanges,
+        };
+
+        m_denoisingPass = CreateComputePipeline(*m_device, desc);
     }
 
     vkDestroyShaderModule(*m_device, fullscreenShader, nullptr);
@@ -335,7 +247,7 @@ void MainScene::OnAttach()
 
     /* Storage buffers */
     {
-        const size_t size = 20 * 1024 * 1024;
+        const size_t size = sizeof(SVNode) * m_svt.GetNodes().size() + sizeof(Voxel) * m_svt.GetVoxels().size();
 
         m_svtBuffer.gpu = m_device->CreateBuffer({
             .Size = size,
@@ -352,6 +264,61 @@ void MainScene::OnAttach()
             .RequiredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,
         });
     }
+
+    {
+        /*
+        m_voxelFaceBuffer = m_device->CreateBuffer({
+            .Size = 1920 * 1080 * 16,
+            .Usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+            .AllocFlags = 0,
+            .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            .RequiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        });*/
+
+        m_vhmBuffer = m_device->CreateBuffer({
+            .Size = 2 * VHM_BUFFER_SIZE,
+            .Usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .AllocFlags = 0,
+            .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            .RequiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        });
+    }
+
+    {
+        int width, height, channels;
+        u8 *stbnTexRGBA = stbi_load("data/stbn_vec2.png", &width, &height, &channels, 4);
+
+
+        if (stbnTexRGBA)
+        {
+            std::vector<u8> stbnTexRG;
+            stbnTexRG.resize(width * height * 2);
+
+            for (size_t i = 0; i < width * height; i++)
+            {
+                stbnTexRG[2 * i + 0] = stbnTexRGBA[4 * i + 0];
+                stbnTexRG[2 * i + 1] = stbnTexRGBA[4 * i + 1];
+            }
+            stbi_image_free(stbnTexRGBA);
+
+            m_stbnImage = m_device->CreateImage({
+                .Type = VK_IMAGE_TYPE_2D,
+                .Format = VK_FORMAT_R8G8_UNORM,
+                .Usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                .Size = { (u32)width, (u32)height, 1 },
+                .MipLevels = 1,
+                .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+            });
+
+            m_device->UploadImage(&m_stbnImage, stbnTexRG.data(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        }
+    }
+
+    m_prevFpsTime = glfwGetTime();
+    m_fps = 0;
+
+    m_currentVHM = 0;
+    m_prevVHM = m_currentVHM + VHM_BUFFER_SIZE;
 }
 
 
@@ -363,24 +330,15 @@ void MainScene::OnDetach()
 
 void MainScene::OnUpdate(f32 dt)
 {
+    f64 currentTime = glfwGetTime();
 
+    if (currentTime - m_prevFpsTime >= 1.0)
     {
-        const Vec3 rayOrigin = m_camera.pos;
-        const Vec3 rayInvDir = 1.0f / glm::normalize(m_camera.dir);
-
-        const Vec3 tMin = (-rayOrigin) * rayInvDir;
-        const Vec3 tMax = (Vec3(m_svt.GetDimensions()) - rayOrigin) * rayInvDir;
-        const Vec3 t1 = glm::min(tMin, tMax);
-        const Vec3 t2 = glm::max(tMin, tMax);
-        const float tNear = glm::max(glm::max(t1.x, t1.y), t1.z);
-        const float tFar = glm::min(glm::min(t2.x, t2.y), t2.z);
-
-        //LOG_TRACE("{} | {} | {}", tNear, tFar, tNear < 0.0f && tFar > 0.0f);
-        //LOG_TRACE("{} | {}", tNear, tFar);
+        m_fps = m_frameCounter;
+        m_frameCounter = 0;
+        m_prevFpsTime = currentTime;
     }
-
-    Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
-    auto* frameData = reinterpret_cast<PerFrameData*>(frame.perFrameData.GetMapped());
+    m_frameCounter += 1;
 
     const Vec3 upAxis = Vec3(0.0f, 0.0f, 1.0f);
 
@@ -412,7 +370,7 @@ void MainScene::OnUpdate(f32 dt)
         if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_LEFT_SHIFT))
             upward = -1.0f;
 
-        m_camera.pos += 10.0f * (forward * m_camera.dir + right * cameraRight + upward * upAxis) * dt;
+        m_camera.pos += 40.0f * (forward * m_camera.dir + right * cameraRight + upward * upAxis) * dt;
     }
 
 
@@ -420,31 +378,15 @@ void MainScene::OnUpdate(f32 dt)
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
-
-    int width, height;
-    glfwGetFramebufferSize(m_app->GetWindow(), &width, &height);
-
-    frameData->Resolution = Vec4(width, height, 0.0f, 0.0f);
-    frameData->CameraPos = Vec4(m_camera.pos, 0.0f);
-    frameData->CameraDir = Vec4(m_camera.dir, 0.0f);
-    frameData->CameraRight = Vec4(cameraRight, 0.0f);
-    frameData->CameraUp = Vec4(cameraUp, 0.0f);
-
-#if 0    
-    ImGui::Begin("Uniforms");
-    ImGui::ColorEdit3("Voxel color", &frameData->Color.x);
-    ImGui::SliderFloat3("Light position", &frameData->LightPos.x, -50.0f, +50.0f);
-    ImGui::ColorEdit3("Light color", &frameData->LightColor.x);
-    ImGui::ColorEdit3("Ambient color", &frameData->Ambient.x);
-    ImGui::End();
-#endif
-
     {
         auto imViewport = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(imViewport->WorkPos, ImGuiCond_Always);
 
         auto flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
         ImGui::Begin("overlay", 0, flags);
+
+        ImGui::Text("FPS: %u", m_fps);
+        ImGui::Separator();
 
         ImGui::Text("X: %.3f", m_camera.pos.x);
         ImGui::Text("Y: %.3f", m_camera.pos.y);
@@ -455,11 +397,6 @@ void MainScene::OnUpdate(f32 dt)
 
 
     ImGui::Render();
-
-    frameData->Map.nodes = m_svtBuffer.gpu.GetDeviceAddress();
-    frameData->Map.voxels = frameData->Map.nodes + sizeof(SVNode) * m_svt.GetNodes().size();
-    frameData->Map.depth = m_svt.GetDepth();
-    frameData->Map.dimensions = m_svt.GetDimensions();
 }
 
 
@@ -467,14 +404,35 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
 {
     Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
 
+    std::swap(m_currentVHM, m_prevVHM);
+
+    PushConstants pc;
+    {
+        pc.CameraPos = Vec4(m_camera.pos, 0.0f);
+        pc.CameraDir = Vec4(m_camera.dir, 0.0f);
+
+        int width, height;
+        glfwGetFramebufferSize(m_app->GetWindow(), &width, &height);
+        pc.Resolution = Vec2(width, height);
+        pc.FrameNo = m_frameNum++;
+
+        pc.VoxelMap.nodes = m_svtBuffer.gpu.GetDeviceAddress();
+        pc.VoxelMap.voxels = pc.VoxelMap.nodes + sizeof(SVNode) * m_svt.GetNodes().size();
+        pc.VoxelMap.depth = m_svt.GetDepth();
+
+
+        pc.CurrentVHM.keys = m_vhmBuffer.GetDeviceAddress() + m_currentVHM;
+        pc.CurrentVHM.values = pc.CurrentVHM.keys + sizeof(u32) * VHM_SIZE;
+
+        pc.PrevVHM.keys = m_vhmBuffer.GetDeviceAddress() + m_prevVHM;
+        pc.PrevVHM.values = pc.PrevVHM.keys + sizeof(u32) * VHM_SIZE;
+    }
 
     if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_T) == GLFW_PRESS)
     {
         m_swapChain->WaitForPreviousFrames();
       
-
-
-        constexpr size_t k_dataSize = 20 * 1024 * 1024;
+        const size_t k_dataSize = sizeof(SVNode) * m_svt.GetNodes().size() + sizeof(Voxel) * m_svt.GetVoxels().size();
         static byte *data = nullptr;
         if (!data) data = new byte[k_dataSize];
 
@@ -488,10 +446,8 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
             memcpy(dstNodes, srcNodes.data(), sizeof(SVNode) * srcNodes.size());
             memcpy(dstVoxels, srcVoxels.data(), sizeof(Voxel) * srcVoxels.size());
 
-            m_device->Write(m_svtBuffer.cpu, 0, data, k_dataSize);
+            m_device->Write(&m_svtBuffer.cpu, 0, data, k_dataSize);
         }
-        //delete[] data;
-       
 
         cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
 
@@ -508,38 +464,96 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
     {
         DescriptorWriter writer;
 
+
         writer.BindSet(frame.descriptorSet);
         {
-            writer.Write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frame.perFrameData);
-            writer.Write(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_svtBuffer.gpu);
-            writer.Write(2, frame.primaryImage, m_sampler);
+           // writer.Write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frame.perFrameData);
+            writer.Write(0, frame.voxelImage, m_sampler);
+            writer.Write(1, frame.normalImage, m_sampler);
+            writer.Write(2, m_stbnImage, m_sampler);    
+
+            //writer.Write(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_svtBuffer.gpu);
+            //writer.Write(2, frame.primaryImage, m_sampler);
         }
         writer.Update(*m_device);
     }
 
-    /* Begin primary pass */
     {
+        cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM, VHM_SIZE * 4, 0xffffffff);
+        cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM + VHM_SIZE * 4, VHM_SIZE * 16, 0);
+
+        cmdBuffer.Barrier({
+
+            .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,            
+        }, &m_vhmBuffer);
+    }
+
+    /* Primary pass */
+    {
+        /*
         Attachment mainAttachment = {
             .Image = &frame.primaryImage,
             .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
-        };
+        };*/
 
         RenderPass renderPass;
-        renderPass.Area = frame.primaryImage.GetArea(),
-        renderPass.Attachments = { mainAttachment };
+        renderPass.Area = frame.voxelImage.GetArea(),
+        renderPass.Attachments = { 
+            {
+                .Image = &frame.voxelImage,
+                .ClearValue = { VkClearColorValue{.uint32 = { UINT32_MAX, UINT32_MAX, UINT32_MAX, UINT32_MAX }} },
+            },
+            {
+                .Image = &frame.normalImage,
+                .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
+            },            
+        };
 
         cmdBuffer.BeginRenderPass(renderPass);
-    }
 
-    /* Draw primary pass */
-    {
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_primaryPass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmdBuffer, m_primaryPass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
         vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_primaryPass);
         vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
 
         cmdBuffer.EndRenderPass();
     }
 
-    /* Transition primary image */
+    {
+        MemoryBarrier barrier = {
+            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        };
+
+        cmdBuffer.Barrier(barrier, &m_vhmBuffer);
+    }
+
+    /* Compute pass */
+    {
+        //vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_denoisingPass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmdBuffer, m_denoisingPass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_denoisingPass);
+
+        vkCmdDispatch(cmdBuffer, VHM_SIZE / 1024, 1, 1);
+    }
+
+    {
+        MemoryBarrier barrier = {
+            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        };
+
+        cmdBuffer.Barrier(barrier, &m_vhmBuffer);
+    }
+
+    /* Transition images */
     {
         MemoryBarrier barrier = {
             .PrevAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
@@ -548,10 +562,11 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
             .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
         };
 
-        cmdBuffer.Barrier(barrier, &frame.primaryImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        cmdBuffer.Barrier(barrier, &frame.voxelImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        cmdBuffer.Barrier(barrier, &frame.normalImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    /* Begin composite pass */
+    /* Composite pass */
     {
         Attachment mainAttachment = {
             .Image = &dstImage,
@@ -563,11 +578,9 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         renderPass.Attachments = { mainAttachment };
 
         cmdBuffer.BeginRenderPass(renderPass);
-    }
 
-    /* Draw composite pass */
-    {
         vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmdBuffer, m_compositePass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
         vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_compositePass);
         vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
 
@@ -575,9 +588,9 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         {
             ImGui_ImplVulkan_RenderDrawData(drawData, cmdBuffer);
         }
-    }
 
-    cmdBuffer.EndRenderPass();
+        cmdBuffer.EndRenderPass();
+    }
 }
 
 
@@ -600,13 +613,6 @@ bool MainScene::OnKeyEvent(int key, int scancode, int action)
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
         else    
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
-    }
-
-    if (key == GLFW_KEY_R && action == GLFW_PRESS)
-    {
-        Vec4 result = Trace(m_svt, m_camera.pos, m_camera.dir);
-
-        //LOG_TRACE("Ray trace: {}, {}, {}, {}", result.x, result.y, result.z, result.w);
     }
     return false;
 }
@@ -644,7 +650,26 @@ void MainScene::createImages(int width, int height)
         if (width == 0 || height == 0)
             return;
         
+        /*
         frame.primaryImage = m_device->CreateImage({
+            .Type = VK_IMAGE_TYPE_2D,
+            .Format = VK_FORMAT_B8G8R8A8_UNORM,
+            .Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .Size = { (uint32_t)width, (uint32_t)height, 1 },
+            .MipLevels = 1,
+            .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+        });*/
+
+        frame.voxelImage = m_device->CreateImage({
+            .Type = VK_IMAGE_TYPE_2D,
+            .Format = VK_FORMAT_R32G32B32A32_UINT,
+            .Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .Size = { (uint32_t)width, (uint32_t)height, 1 },
+            .MipLevels = 1,
+            .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+        });
+
+        frame.normalImage = m_device->CreateImage({
             .Type = VK_IMAGE_TYPE_2D,
             .Format = VK_FORMAT_B8G8R8A8_UNORM,
             .Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -658,9 +683,14 @@ void MainScene::createImages(int width, int height)
 
 VkShaderModule MainScene::loadShader(std::string_view path)
 {
-    auto code = *FileSystem::ReadFile(path);
+    auto code = FileSystem::ReadFile(path);
+    if (!code)
+    {
+        LOG_ERROR("Failed to load shader: '{}'", path);
+        return VK_NULL_HANDLE;
+    }
 
-    return m_device->CreateShaderModule(code);
+    return m_device->CreateShaderModule(*code);
 }
 
 

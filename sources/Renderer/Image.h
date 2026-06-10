@@ -40,6 +40,8 @@ public:
     inline VkImageAspectFlags GetAspect() const { return m_subresourceRange.aspectMask; }
     inline VkImageSubresourceRange GetSubresourceRange() const { return m_subresourceRange; }
 
+    VkDeviceSize GetBufferSize() const;
+
 private:
     VmaAllocation m_alloc = VK_NULL_HANDLE;
     VkImage m_handle = VK_NULL_HANDLE;

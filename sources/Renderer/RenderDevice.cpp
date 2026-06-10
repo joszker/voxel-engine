@@ -1,10 +1,12 @@
 #include "RenderDevice.h"
 #include "Base/Log.h"
+#include "CommandBuffer.h"
 
 #include <GLFW/glfw3.h>
 #include <vector>
 #include <set>
 #include <array>
+#include <functional>
 
 
 #define VMA_IMPLEMENTATION
@@ -123,6 +125,8 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         
         VkBool32 foundPresentFamily = VK_FALSE;
         VkBool32 foundGraphicsFamily = VK_FALSE;
+        VkBool32 foundTransferFamily = VK_FALSE;
+
         size_t index = 0;
         for (auto queueFamily : queueFamilies)
         {   
@@ -147,23 +151,37 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
             {
                 foundGraphicsFamily = VK_TRUE;
                 m_graphicsQueueFamily = index;
+
+                ASSERT(queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT);
             }
+            else if (queueFamily.queueFlags & VK_QUEUE_COMPUTE_BIT)
+            {
+                /* Found dedicated compute queue... */
+            }
+            else if (queueFamily.queueFlags & VK_QUEUE_TRANSFER_BIT)
+            {
+                /* Found dedicated transfer queue */
+                foundTransferFamily = VK_TRUE;
+                m_transferQueueFamily = index;
+            }
+
             index++;
         }
         if (!foundPresentFamily || !foundGraphicsFamily)
         {
             return false;
         }
-
-        //m_computeQueueFamily = 0;
-        //m_transferQueueFamily = 0;
+        if (!foundTransferFamily)
+        {
+            m_transferQueueFamily = m_graphicsQueueFamily;
+        }
     }
 
     /* Create logical device */
     {
         float queuePriorities[1] = { 1.0f };
         VkDeviceQueueCreateInfo queueInfos[3] = {};
-        std::set<uint32_t> queueFamilies = { m_graphicsQueueFamily, m_presentQueueFamily };
+        std::set<uint32_t> queueFamilies = { m_graphicsQueueFamily, m_presentQueueFamily, m_transferQueueFamily };
         int i = 0;
         for (uint32_t queueFamily : queueFamilies)
         {
@@ -174,7 +192,14 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
             ++i;
         }
 
-        std::array extensions = { "VK_KHR_swapchain" };
+        std::array extensions = { "VK_KHR_swapchain", "VK_EXT_shader_atomic_float" };
+
+        /* Enable shader atomic float operations */
+        VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
+            .shaderBufferFloat32Atomics = VK_TRUE,
+            .shaderBufferFloat32AtomicAdd = VK_TRUE,
+        };
 
         /* Enable dynamic rendering */
         VkPhysicalDeviceDynamicRenderingFeatures dynamicRenderingFeatures {
@@ -188,7 +213,7 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
             .maintenance9 = VK_TRUE,
         };*/
 
-        /* Enable vulkan 1.2 devkce features */
+        /* Enable vulkan 1.2 device features */
         VkPhysicalDeviceVulkan12Features vk12Features {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
             .storageBuffer8BitAccess = VK_TRUE,
@@ -196,7 +221,8 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
             .bufferDeviceAddress = VK_TRUE,
         };
 
-        //m9Features.pNext = &dynamicRenderingFeatures;
+ 
+        dynamicRenderingFeatures.pNext = &atomicFloatFeatures;
         vk12Features.pNext = &dynamicRenderingFeatures;
 
         VkDeviceCreateInfo info = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
@@ -214,6 +240,7 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
     {
         vkGetDeviceQueue(m_device, m_graphicsQueueFamily, 0, &m_graphicsQueue);
         vkGetDeviceQueue(m_device, m_presentQueueFamily, 0, &m_presentQueue);
+        vkGetDeviceQueue(m_device, m_transferQueueFamily, 0, &m_transferQueue);
     }
 
     LOG_INFO("Graphics Queue = {}", (void*)m_graphicsQueue);
@@ -233,7 +260,7 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
     }
 
 
-    /* Create command pool */
+    /* Create graphics command pool */
     {
         VkCommandPoolCreateInfo info = {};
         info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
@@ -241,6 +268,32 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         info.queueFamilyIndex = m_graphicsQueueFamily;
 
         VK_CHECK(vkCreateCommandPool(m_device, &info, nullptr, &m_graphicsCmdPool));
+    }
+
+    if (hasDedicatedTransferQueue())
+    {
+        VkCommandPoolCreateInfo info = {};
+        info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+        info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+        info.queueFamilyIndex = m_transferQueueFamily;
+
+        VK_CHECK(vkCreateCommandPool(m_device, &info, nullptr, &m_transferCmdPool));        
+    }
+    else
+    {
+        m_transferCmdPool = m_graphicsCmdPool;
+    }
+
+    /* Create transfer command buffer */
+    {
+        VkCommandBufferAllocateInfo info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = m_transferCmdPool,
+            .commandBufferCount = 1,
+        };
+        VK_CHECK(vkAllocateCommandBuffers(m_device, &info, &m_transferCmdBuffer));
+
+        m_transferPending = MakeFence(true);
     }
 
     return true;
@@ -361,9 +414,9 @@ void RenderDevice::DestroyBuffer(const Buffer& buffer)
     vmaDestroyBuffer(m_allocator, buffer, buffer.GetAllocation());
 }
 
-void RenderDevice::Write(Buffer& buffer, size_t dstOffset, const void *src, size_t numBytes)
+void RenderDevice::Write(Buffer *buffer, size_t dstOffset, const void *src, size_t numBytes)
 {
-    VmaAllocation allocation = buffer.GetAllocation();
+    VmaAllocation allocation = buffer->GetAllocation();
 
     void *mapped;
     vmaMapMemory(m_allocator, allocation, &mapped);
@@ -507,4 +560,87 @@ void RenderDevice::DestroyImage(const Image& image)
     {
         vmaDestroyImage(m_allocator, image, allocation);
     }
+}
+
+
+void RenderDevice::Submit(std::function<void(CommandBuffer)> callback, const SubmitInfo& submit)
+{
+    CommandBuffer cmdBuffer = m_transferCmdBuffer;
+
+    /* Wait until transferCmdBuffer is not pending anymore */
+    vkWaitForFences(m_device, 1, &m_transferPending, VK_TRUE, UINT64_MAX);
+    vkResetFences(m_device, 1, &m_transferPending);
+
+    cmdBuffer.Begin(VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT);
+    callback(cmdBuffer);
+    cmdBuffer.End();
+
+    VkSubmitInfo submitInfo = {
+        .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+        .waitSemaphoreCount = submit.Wait ? 1u : 0u,
+        .pWaitSemaphores = submit.Wait ? &submit.Wait : nullptr,
+        .pWaitDstStageMask = submit.Wait ? &submit.WaitStage : nullptr,
+        .commandBufferCount = 1,
+        .pCommandBuffers = cmdBuffer.Ptr(),
+        .signalSemaphoreCount = submit.Signal ? 1u : 0u,
+        .pSignalSemaphores = submit.Signal ? &submit.Signal : nullptr,
+    };
+
+    VK_CHECK(vkQueueSubmit(m_transferQueue, 1, &submitInfo, m_transferPending));
+}
+
+
+void RenderDevice::UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout, VkImageSubresourceLayers subresLayers)
+{
+    const auto subresRange = dstImage->GetSubresourceRange();
+    ASSERT(subresLayers.aspectMask & subresRange.aspectMask != 0);
+    ASSERT(subresLayers.mipLevel < subresRange.levelCount);
+    ASSERT(subresLayers.baseArrayLayer >= subresRange.baseArrayLayer);
+    ASSERT(subresLayers.baseArrayLayer + subresLayers.layerCount <= subresRange.layerCount);
+
+
+    Buffer stagingBuffer = CreateBuffer({
+        .Size = dstImage->GetBufferSize(),
+        .Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .AllocFlags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    });
+    this->Write(&stagingBuffer, 0, srcData, stagingBuffer.GetSize());
+
+    this->Submit([&](CommandBuffer cmdBuffer)
+    {
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+        }, dstImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+        VkBufferImageCopy dstRegion = {
+            .bufferOffset = 0,
+            .bufferRowLength = 0,
+            .imageSubresource = subresLayers,
+            .imageOffset = { 0, 0, 0 },
+            .imageExtent = dstImage->GetSize(),
+        };
+        vkCmdCopyBufferToImage(cmdBuffer, stagingBuffer, *dstImage, dstImage->GetCurrentLayout(), 1, &dstRegion);
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        }, dstImage, newLayout);
+    });
+}
+
+
+void RenderDevice::UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout)
+{
+    VkImageSubresourceLayers subresLayers = {
+        .aspectMask = dstImage->GetAspect(),
+        .mipLevel = 0,
+        .baseArrayLayer = 0,
+        .layerCount = 1,
+    };
+
+    return UploadImage(dstImage, srcData, newLayout, subresLayers);
 }

@@ -70,6 +70,7 @@ public:
     void SetDescriptorLayouts(std::span<VkDescriptorSetLayout> layouts);
     void AddDescriptorLayout(VkDescriptorSetLayout layout);
     void SetPushConstantRanges(std::span<VkPushConstantRange> ranges);
+    void AddPushConstantRange(VkPushConstantRange range);
 
 
 private:
@@ -88,3 +89,18 @@ private:
     std::vector<VkDescriptorSetLayout> m_descriptorSetLayouts;
     std::vector<VkPushConstantRange> m_pushConstantRanges;
 };
+
+
+
+struct ComputePipelineDesc
+{
+    VkPipelineCreateFlags Flags = 0;
+    VkPipelineShaderStageCreateFlags ShaderFlags = 0;
+    VkShaderModule ShaderModule = 0;
+    const char *ShaderEntryPoint = "main";
+    std::span<VkDescriptorSetLayout> DescriptorLayouts;
+    std::span<VkPushConstantRange> PushConstantRanges;
+};
+
+
+Pipeline CreateComputePipeline(VkDevice device, const ComputePipelineDesc& desc);

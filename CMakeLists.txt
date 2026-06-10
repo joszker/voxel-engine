@@ -76,8 +76,6 @@ target_include_directories(VxDemo PRIVATE
 
 #==================================== Compile shaders ===================================#
 
-message("::VALIDATOR::")
-message(${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE})
 
 set(SHADER_DIR ${SOURCE_DIR}/Shaders)
 file(GLOB SHADER_FILES ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.frag ${SHADER_DIR}/*.comp)

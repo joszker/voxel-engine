@@ -18,12 +18,26 @@ struct VoxelArray
     std::vector<Voxel> Data;
     Vec3u Size;
 
+    inline void Init(Vec3u size)
+    {
+        Size = size;
+        Data.resize(Size.x * Size.y * Size.z);
+    }
+
     inline Voxel Get(Vec3u index) const
     {
         if (index.x >= Size.x || index.y >= Size.y || index.z >= Size.z)
             return Voxel{};
 
         return Data[index.z * (Size.x * Size.y) + index.y * Size.x + index.x];
+    }
+
+    inline void Set(Vec3u index, Voxel voxel)
+    {
+        if (index.x >= Size.x || index.y >= Size.y || index.z >= Size.z)
+            return;
+
+        Data[index.z * (Size.x * Size.y) + index.y * Size.x + index.x] = voxel;
     }
 };
 

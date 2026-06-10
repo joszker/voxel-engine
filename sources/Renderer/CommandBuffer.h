@@ -51,14 +51,15 @@ public:
     CommandBuffer(VkCommandBuffer cmdBuffer) : m_handle(cmdBuffer) {}
 
     inline operator VkCommandBuffer() { return m_handle; }
+    inline VkCommandBuffer *Ptr() { return &m_handle; }
 
-    void Begin();
+    void Begin(VkCommandBufferUsageFlags flags = 0);
     void End();
     void BeginRenderPass(const VkRenderingInfo& renderInfo);
     void BeginRenderPass(const RenderPass& renderPass);
     void EndRenderPass();
 
-    void Barrier(const MemoryBarrier& barrier, Buffer* buffer);
+    void Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
     void Barrier(const MemoryBarrier& barrier, Image* image, VkImageLayout newLayout);
 
     void SetViewport(const VkViewport& viewport);
@@ -66,6 +67,7 @@ public:
 
     void Copy(const Buffer *src, Buffer *dst);
     void Copy(const Buffer *src, Buffer *dst, size_t numBytes);
+    void Fill(Buffer *dst, VkDeviceSize offset, VkDeviceSize size, u32 data);
 
 private:
     VkCommandBuffer m_handle{};

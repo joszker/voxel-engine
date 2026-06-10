@@ -299,3 +299,45 @@ void PipelineBuilder::SetPushConstantRanges(std::span<VkPushConstantRange> range
 {
     m_pushConstantRanges.assign(ranges.begin(), ranges.end());
 }
+
+
+void PipelineBuilder::AddPushConstantRange(VkPushConstantRange range)
+{
+    m_pushConstantRanges.push_back(range);
+}
+
+
+
+Pipeline CreateComputePipeline(VkDevice device, const ComputePipelineDesc& desc)
+{
+    /* Pipeline layout */
+    VkPipelineLayout layout;
+    {
+        VkPipelineLayoutCreateInfo layoutInfo = {};
+        layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        layoutInfo.setLayoutCount = desc.DescriptorLayouts.size();
+        layoutInfo.pSetLayouts = desc.DescriptorLayouts.data();
+        layoutInfo.pushConstantRangeCount = desc.PushConstantRanges.size();
+        layoutInfo.pPushConstantRanges = desc.PushConstantRanges.data();
+        
+        VK_CHECK(vkCreatePipelineLayout(device, &layoutInfo, nullptr, &layout));
+    }
+
+    VkComputePipelineCreateInfo info = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .flags = desc.Flags,
+        .stage = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+            .flags = desc.ShaderFlags,
+            .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+            .module = desc.ShaderModule,
+            .pName = desc.ShaderEntryPoint,
+        },
+        .layout = layout,
+    };
+
+    VkPipeline pipeline;
+    VK_CHECK(vkCreateComputePipelines(device, VK_NULL_HANDLE, 1, &info, nullptr, &pipeline));
+
+    return { pipeline, layout };
+}

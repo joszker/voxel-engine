@@ -57,7 +57,7 @@ bool Application::Run()
 
 
     m_device.Init(m_window, true);
-    m_swapChain.Init(m_window, 2);
+    m_swapChain.Init(m_window, 1);
 
     PushScene(std::make_shared<MainScene>());
 
@@ -79,7 +79,14 @@ bool Application::Run()
             {
                 cmdBuffer.Begin();
                 currentScene->OnRender(*image, cmdBuffer);
-                MakeImagePresentable(cmdBuffer, *image);
+
+                //MakeImagePresentable(cmdBuffer, *image);
+                cmdBuffer.Barrier({
+                    .PrevAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                    .PrevStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                    .NextStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+                }, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
                 cmdBuffer.End();
 
                 m_swapChain.Submit(cmdBuffer);

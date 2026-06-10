@@ -6,11 +6,11 @@
 
 
 
-void CommandBuffer::Begin()
+void CommandBuffer::Begin(VkCommandBufferUsageFlags flags)
 {
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    beginInfo.flags = 0;
+    beginInfo.flags = flags;
 
     VK_CHECK(vkBeginCommandBuffer(m_handle, &beginInfo));
 }
@@ -122,15 +122,15 @@ void CommandBuffer::EndRenderPass()
 }
 
 
-void CommandBuffer::Barrier(const MemoryBarrier& barrier, Buffer* buffer)
+void CommandBuffer::Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset, VkDeviceSize size)
 {
     const VkBufferMemoryBarrier bufferMemoryBarrier {
         .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
         .srcAccessMask = barrier.PrevAccess,
         .dstAccessMask = barrier.NextAccess,
         .buffer = *buffer,
-        .offset = 0,
-        .size = VK_WHOLE_SIZE,
+        .offset = offset,
+        .size = size,
     };
 
     VkPipelineStageFlags currentStage = buffer->GetCurrentStage();
@@ -185,7 +185,8 @@ void CommandBuffer::Barrier(const MemoryBarrier& barrier, Image* image, VkImageL
         0, nullptr,                         // buffer memory barriers
         1, &imageMemoryBarrier              // image memory barriers
     );
-    image->m_currentStage = barrier.NextStage;    
+    image->m_currentStage = barrier.NextStage;
+    image->m_currentLayout = newLayout;
 }
 
 
@@ -206,6 +207,7 @@ void CommandBuffer::Copy(const Buffer *src, Buffer *dst)
     Copy(src, dst, std::min(src->GetSize(), dst->GetSize()));
 }
 
+
 void CommandBuffer::Copy(const Buffer *src, Buffer *dst, size_t numBytes)
 {
     ASSERT((src->GetUsage() & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0);
@@ -220,6 +222,14 @@ void CommandBuffer::Copy(const Buffer *src, Buffer *dst, size_t numBytes)
         .size = numBytes,
     };
     vkCmdCopyBuffer(m_handle, *src, *dst, 1, &copy);
+
+    dst->m_currentStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+}
+
+
+void CommandBuffer::Fill(Buffer *dst, VkDeviceSize offset, VkDeviceSize size, u32 data)
+{
+    vkCmdFillBuffer(m_handle, *dst, offset, size, data);
 
     dst->m_currentStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 }

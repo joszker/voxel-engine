@@ -6,3 +6,11 @@ Image::Image(VmaAllocation alloc, VkImage image, VkImageView imageView, const Im
 {
     
 }
+
+
+VkDeviceSize Image::GetBufferSize() const
+{
+    size_t texelSize = VkUtils::GetTexelSize(m_desc.Format);
+
+    return texelSize * (size_t)GetWidth() * (size_t)GetHeight() * (size_t)GetDepth();
+}

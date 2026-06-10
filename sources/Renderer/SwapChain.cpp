@@ -281,6 +281,9 @@ void SwapChain::Present()
 
 void SwapChain::WaitForPreviousFrames()
 {
+    if (m_frames.size() == 1)
+        return;
+
     std::vector<VkFence> inFlightFences;
     inFlightFences.reserve(m_frames.size() - 1);
 
@@ -291,5 +294,5 @@ void SwapChain::WaitForPreviousFrames()
         inFlightFences.push_back(m_frames[frameIdx].inFlight);
     }
 
-    vkWaitForFences(m_device, inFlightFences.size(), inFlightFences.data(), VK_TRUE, UINT64_MAX);
+    VK_CHECK(vkWaitForFences(m_device, inFlightFences.size(), inFlightFences.data(), VK_TRUE, UINT64_MAX));
 }
