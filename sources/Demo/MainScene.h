@@ -6,6 +6,14 @@
 #include "Voxel/SVTree.h"
 
 
+struct alignas(16) Material
+{
+    u8 color[4];
+    float emission;
+};
+
+
+
 class MainScene : public Scene
 {
 public:
@@ -24,15 +32,22 @@ public:
 
 
 private:
+    void loadMap(std::string path);
+
+    void writeSVT(Buffer *svtBuffer);
+
     void createImages(int width, int height);
     VkShaderModule loadShader(std::string_view path);
+
+    void updatePalette();
 
     void initImGui();
     void deinitImGui();
 
 private:
     Pipeline m_primaryPass{};
-    Pipeline m_denoisingPass{};
+    Pipeline m_blurPass{};
+    Pipeline m_averagingPass{};
     Pipeline m_compositePass{};
 
     VkSampler m_sampler{};
@@ -52,6 +67,7 @@ private:
     VkDeviceAddress m_prevVHM;
     VkDeviceAddress m_currentVHM;
 
+    Buffer m_paletteBuffer;
 
     struct Frame
     {
@@ -62,6 +78,8 @@ private:
 
         Image voxelImage;
         Image normalImage;
+        Image radianceImage;
+        Image blurImage;
     };
     std::vector<Frame> m_frames;
 
@@ -81,4 +99,12 @@ private:
     uint m_frameCounter;
     f64 m_prevFpsTime;
     uint m_frameNum = 0;
+    std::array<Material, 256> m_palette;
+
+    Vec3 m_ambientLight;
+    Vec3 m_sunLight;
+    float m_sunElevation;
+    float m_sunAzimuth;
+
+    bool m_svtModified = false;
 };

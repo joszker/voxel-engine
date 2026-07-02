@@ -51,6 +51,8 @@ public:
     void Submit(std::function<void(CommandBuffer)> callback, const SubmitInfo& submit = {});
     void UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout, VkImageSubresourceLayers subresLayers);
     void UploadImage(Image *dstImage, const void *srcData, VkImageLayout newLayout);
+    void UploadBuffer(Buffer *dstBuffer, size_t dstOffset, const void *srcData, size_t size);
+
 
     inline VkInstance GetInstance() const { return m_instance; }
     inline VkSurfaceKHR GetSurface() const { return m_surface; }

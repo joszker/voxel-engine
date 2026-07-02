@@ -1,4 +1,11 @@
-
+struct VHData
+{
+    vec4 radiance;
+    float sun;
+    uint frame;
+    uint data1;
+    uint data2;
+};
 
 layout(std430, buffer_reference, buffer_reference_align = 4) buffer VHKeys
 {
@@ -7,7 +14,7 @@ layout(std430, buffer_reference, buffer_reference_align = 4) buffer VHKeys
 
 layout(std430, buffer_reference, buffer_reference_align = 16) buffer VHValues
 {
-    vec4 at[];
+    VHData at[];
 };
 
 
@@ -18,7 +25,14 @@ struct VoxelHashMap
 };
 
 #define VHM_EMPTY_KEY       0xffffffff
-#define VHM_BUFFER_SIZE     16777216       
+#define VHM_BUFFER_SIZE     16777216
+
+
+#define VHM_SAMPLE_LIMIT    524288
+//#define VHM_SAMPLE_LIMIT    16384
+//#define VHM_SAMPLE_LIMIT    1024
+//#define VHM_SAMPLE_LIMIT    16384
+//#define VHM_SAMPLE_LIMIT      64
 
 
 uint Hash(uint k, uint n)
@@ -33,7 +47,7 @@ uint Hash(uint k, uint n)
 
 
 
-void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample)
+void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample, float sun, uint frame)
 {
     uint slot = Hash(key, VHM_BUFFER_SIZE);
 
@@ -43,13 +57,35 @@ void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample)
 
         if (prevKey == VHM_EMPTY_KEY || prevKey == key)
         {
-            atomicAdd(vhm.values.at[slot].r, radianceSample.r);
-            atomicAdd(vhm.values.at[slot].g, radianceSample.g);
-            atomicAdd(vhm.values.at[slot].b, radianceSample.b);
-            atomicAdd(vhm.values.at[slot].w, 1.0);
+            if (vhm.values.at[slot].radiance.w < VHM_SAMPLE_LIMIT)
+            {
+                atomicAdd(vhm.values.at[slot].radiance.r, radianceSample.r);
+                atomicAdd(vhm.values.at[slot].radiance.g, radianceSample.g);
+                atomicAdd(vhm.values.at[slot].radiance.b, radianceSample.b);
+                atomicAdd(vhm.values.at[slot].radiance.w, 1.0);
+
+                atomicAdd(vhm.values.at[slot].sun, sun);
+            }
+            atomicExchange(vhm.values.at[slot].frame, frame);
 
             return;
         }
+
+        /*
+        if (frame - vhm.values.at[slot].frame > 2000)
+        {
+            // Reuse slot if it hasn't been used for 2000 frames.
+
+            atomicExchange(vhm.keys.at[slot], key);
+            atomicExchange(vhm.values.at[slot].radiance.r, radianceSample.r);
+            atomicExchange(vhm.values.at[slot].radiance.g, radianceSample.g);
+            atomicExchange(vhm.values.at[slot].radiance.b, radianceSample.b);
+            atomicExchange(vhm.values.at[slot].radiance.w, 1.0);
+            atomicExchange(vhm.values.at[slot].sun, sun);
+            atomicExchange(vhm.values.at[slot].frame, frame);
+
+            return;
+        }*/
 
         slot += 1;
         slot &= VHM_BUFFER_SIZE - 1;
@@ -57,11 +93,35 @@ void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample)
 }
 
 
-vec4 VHM_Lookup(VoxelHashMap vhm, uint key)
+VHData VHM_Lookup(VoxelHashMap vhm, uint key)
 {
     uint slot = Hash(key, VHM_BUFFER_SIZE);
 
     for (uint i = 0; i < 256; i++)
+    {
+        if (vhm.keys.at[slot] == key)
+        {
+            return vhm.values.at[slot];
+        }
+        if (vhm.keys.at[slot] == VHM_EMPTY_KEY)
+        {
+            return VHData(vec4(0, 1, 0, 1), 0, 0, 0, 0);
+        }
+
+        slot += 1;
+        slot &= VHM_BUFFER_SIZE - 1;
+    }
+    return VHData(vec4(0, 0, 0, 2048), 0, 0, 0, 0);
+}
+
+
+
+/*
+vec4 VHM_QuickLookup(VoxelHashMap vhm, uint key)
+{
+    uint slot = Hash(key, VHM_BUFFER_SIZE);
+
+    for (uint i = 0; i < 64; i++)
     {
         if (vhm.keys.at[slot] == key)
         {
@@ -77,3 +137,4 @@ vec4 VHM_Lookup(VoxelHashMap vhm, uint key)
     }
     return vec4(0.0);
 }
+*/

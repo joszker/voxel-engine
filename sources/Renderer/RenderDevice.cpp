@@ -194,6 +194,13 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
 
         std::array extensions = { "VK_KHR_swapchain", "VK_EXT_shader_atomic_float" };
 
+
+        /* Enable synchronization 2 */
+        VkPhysicalDeviceSynchronization2Features sync2Features {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SYNCHRONIZATION_2_FEATURES,
+            .synchronization2 = VK_TRUE,
+        };
+
         /* Enable shader atomic float operations */
         VkPhysicalDeviceShaderAtomicFloatFeaturesEXT atomicFloatFeatures {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SHADER_ATOMIC_FLOAT_FEATURES_EXT,
@@ -217,11 +224,13 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         VkPhysicalDeviceVulkan12Features vk12Features {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
             .storageBuffer8BitAccess = VK_TRUE,
+            .uniformAndStorageBuffer8BitAccess = VK_TRUE,
             .shaderInt8 = VK_TRUE,
             .bufferDeviceAddress = VK_TRUE,
         };
 
- 
+        
+        atomicFloatFeatures.pNext = &sync2Features;
         dynamicRenderingFeatures.pNext = &atomicFloatFeatures;
         vk12Features.pNext = &dynamicRenderingFeatures;
 
@@ -416,6 +425,8 @@ void RenderDevice::DestroyBuffer(const Buffer& buffer)
 
 void RenderDevice::Write(Buffer *buffer, size_t dstOffset, const void *src, size_t numBytes)
 {
+    ASSERT(dstOffset + numBytes <= buffer->GetSize());
+
     VmaAllocation allocation = buffer->GetAllocation();
 
     void *mapped;
@@ -643,4 +654,39 @@ void RenderDevice::UploadImage(Image *dstImage, const void *srcData, VkImageLayo
     };
 
     return UploadImage(dstImage, srcData, newLayout, subresLayers);
+}
+
+
+void RenderDevice::UploadBuffer(Buffer *dstBuffer, size_t dstOffset, const void *srcData, size_t size)
+{
+    ASSERT(dstOffset + size <= dstBuffer->GetSize());
+
+    Buffer stagingBuffer = CreateBuffer({
+        .Size = size,
+        .Usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        .AllocFlags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT
+    });
+    this->Write(&stagingBuffer, 0, srcData, stagingBuffer.GetSize());
+
+    this->Submit([&](CommandBuffer cmdBuffer)
+    {
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextStage = VK_PIPELINE_STAGE_TRANSFER_BIT,            
+        }, dstBuffer, dstOffset, size);
+
+        cmdBuffer.Copy(&stagingBuffer, dstBuffer, {
+            .srcOffset = 0,
+            .dstOffset = dstOffset,
+            .size = size,
+        });
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,            
+        }, dstBuffer, dstOffset, size);        
+    });
 }

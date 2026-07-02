@@ -96,6 +96,11 @@ struct SVNode
         return u64(ChildrenPtr) + popcnt64(ChildMask & ((1ull << index) - 1));
     }
 
+    inline uint GetChildrenCount()
+    {
+        return popcnt64(ChildMask);
+    }
+
     inline const SVNode *Get(uint index, const SVNode *nodes) const
     {
         if (index >= 64 || !IsOccupied(index))
@@ -163,6 +168,10 @@ public:
 
     Voxel Get(Vec3u index) const;
 
+    void Modify(Vec3u min, Vec3u max, Voxel voxel);
+
+    bool Dump(std::ostream& output);
+    bool Load(std::istream& input);
 
 private:
     SVNode insertArray(const VoxelArray& array, Vec3u offset, u32 level);
@@ -172,6 +181,11 @@ private:
 
     SVNode insertNodes(std::span<SVNode> nodes, u64 nodeMask);
 
+    SVNode makeEmptyNode();
+
+    void modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel voxel);
+
+    SVNode create(u32 level, Vec3u min, Vec3u max, Voxel voxel);
 
 private:
     Vec3u m_dimensions;

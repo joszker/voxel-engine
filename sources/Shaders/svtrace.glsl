@@ -22,7 +22,7 @@ struct SV_Node
 
 struct SV_Tree
 {
-    uint root;
+    uint voxelCount;
     uint depth;
     SVT_Nodes pNodes;
     SVT_Leafs pVoxels;
@@ -76,7 +76,7 @@ vec3 GetStepMask(vec3 sideDist)
 /*
     Voxel ray-marching procedure. For a detailed explanation see comment below.
 */
-bool RayTrace(SV_Tree tree, vec3 rayOrigin, vec3 rayDir, out uvec3 oVoxelPos, out uint oVoxelPtr, out vec3 oNormal)
+bool RayTrace(SV_Tree tree, vec3 rayOrigin, vec3 rayDir, out uvec3 oVoxelPos, out uint oVoxelPtr, out vec3 oNormal, out vec3 oHitPos)
 {
     oVoxelPos = uvec3(0, 0, 0);
     oVoxelPtr = 0xffffffff;
@@ -143,6 +143,8 @@ bool RayTrace(SV_Tree tree, vec3 rayOrigin, vec3 rayDir, out uvec3 oVoxelPos, ou
         if (SV_IsLeaf(node) && SV_IsOccupied(node, childIndex))
         {
             vec3 cellPos = uintBitsToFloat(floatBitsToUint(pos) & (0xffffffff << scaleExp));
+
+            oHitPos = float(ipow4(tree.depth)) * mix(2.0 - pos, pos - 1.0, greaterThanEqual(rayDir, vec3(0.0)));
             
             // Determine the voxels' grid position:
             oVoxelPos = uvec3((cellPos - 1.0) * float(ipow4(tree.depth)));
@@ -150,6 +152,10 @@ bool RayTrace(SV_Tree tree, vec3 rayOrigin, vec3 rayDir, out uvec3 oVoxelPos, ou
 
             oVoxelPtr = SV_GetChild(node, childIndex);
             oNormal = -kRaySign * GetStepMask(sideDist);
+
+            //float tNearestSide = min(min(sideDist.x, sideDist.y), sideDist.z);
+            //bvec3 sideMask = greaterThanEqual(vec3(tNearestSide), sideDist);
+            //oNormal = -kRaySign * vec3(sideMask);
 
             return true;
         }

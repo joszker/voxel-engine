@@ -213,3 +213,4 @@ inline u32 NextPowerOf2(u32 x)
     return x + 1;
 #endif
 }
+

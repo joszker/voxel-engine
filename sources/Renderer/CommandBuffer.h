@@ -60,6 +60,7 @@ public:
     void EndRenderPass();
 
     void Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
+    void Barrier2(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
     void Barrier(const MemoryBarrier& barrier, Image* image, VkImageLayout newLayout);
 
     void SetViewport(const VkViewport& viewport);
@@ -67,6 +68,8 @@ public:
 
     void Copy(const Buffer *src, Buffer *dst);
     void Copy(const Buffer *src, Buffer *dst, size_t numBytes);
+    void Copy(const Buffer *src, Buffer *dst, VkBufferCopy copy);
+    
     void Fill(Buffer *dst, VkDeviceSize offset, VkDeviceSize size, u32 data);
 
 private:

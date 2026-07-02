@@ -12,8 +12,8 @@
 #include <glm/gtx/bit.hpp>
 
 #include "Voxel/SVTree.h"
+#include "Voxel/VoxLoader.h"
 
-#define OGT_VOX_IMPLEMENTATION
 #include "3rdparty/ogt_vox.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -21,14 +21,15 @@
 
 struct GPU_SVTree
 {
-    u32 root;
+    //u32 root;
+    u32 voxelCount;
     u32 depth;
     VkDeviceAddress nodes;      // SVNode*
     VkDeviceAddress voxels;     // Voxel* 
 };
 
 #define VHM_SIZE            16777216
-#define VHM_BUFFER_SIZE     (VHM_SIZE * 20)
+#define VHM_BUFFER_SIZE     (VHM_SIZE * 36)
 
 struct GPU_VoxelHashMap
 {
@@ -38,6 +39,10 @@ struct GPU_VoxelHashMap
 
 struct PushConstants
 {
+    Vec4 AmbientLight;
+    Vec4 SunDir;
+    Vec4 SunLight;
+
     Vec4 CameraPos;
     Vec4 CameraDir;
     Vec2 Resolution;
@@ -49,74 +54,13 @@ struct PushConstants
 };
 
 
-
+constexpr int X = offsetof(PushConstants, FrameNo);
 
 
 
 void MainScene::OnAttach()
 {
-    auto voxData = FileSystem::ReadFile("data/room.vox");
-    if (voxData)
-    {
-        auto *scene = ogt_vox_read_scene(voxData->data(), voxData->size());
-
-#if 1
-        Vec3i boundsMin(INT32_MAX), boundsMax(INT32_MIN);
-
-        for (uint32_t i = 0; i < scene->num_instances; i++)
-        {
-            auto *instance = scene->instances + i;
-            auto *model = scene->models[instance->model_index];
-
-            Vec3i position = Vec3(instance->transform.m30, instance->transform.m31, instance->transform.m32);
-            Vec3i size = Vec3(model->size_x, model->size_y, model->size_z);
-
-            boundsMin = glm::min(boundsMin, Vec3i(glm::floor(Vec3(position) - Vec3(size) / 2.0f)));
-            boundsMax = glm::max(boundsMax, Vec3i(glm::ceil(Vec3(position) + Vec3(size) / 2.0f)));
-        }
-
-        Vec3u sceneSize = boundsMax - boundsMin;
-        VoxelArray voxels{};
-        voxels.Init(sceneSize);
-
-        for (uint32_t i = 0; i < scene->num_instances; i++)
-        {
-            auto *instance = scene->instances + i;
-            auto *model = scene->models[instance->model_index];
-
-            Vec3i size = Vec3(model->size_x, model->size_y, model->size_z);
-            Vec3i position = Vec3(instance->transform.m30, instance->transform.m31, instance->transform.m32) - Vec3(size / 2);
-            
-            for (u32 z = 0; z < size.z; z++)
-            {
-                for (u32 y = 0; y < size.y; y++)
-                {
-                    const uint8_t *srcVoxels = &model->voxel_data[z * (size.x * size.y) + y * size.x];
-
-                    Vec3u pos = (position + Vec3i(0, y, z)) - boundsMin;
-                    
-                    memcpy(&voxels.Data[pos.z * (voxels.Size.x * voxels.Size.y) + pos.y * voxels.Size.x + pos.x], srcVoxels, size.x * sizeof(Voxel));
-                }
-            }
-        }
-#else
-
-        auto *model = scene->models[0];
-
-        VoxelArray voxels{};
-        voxels.Size = Vec3u(model->size_x, model->size_y, model->size_z);
-
-        size_t size = model->size_x * model->size_y * model->size_z;
-
-        voxels.Data.resize(size);
-        memcpy(voxels.Data.data(), model->voxel_data, sizeof(Voxel) * size);
-        //for (size_t i = 0; i < size; i++)
-        //    voxels.Data.push_back(Voxel{ model->voxel_data[i] });
-#endif
-
-        m_svt = SVTree(voxels);
-    }
-
+    loadMap("data/castle2");
 
     m_camera.pos = Vec3(0.0f, 0.0f, 0.0f);
     m_camera.yaw = glm::half_pi<f32>();
@@ -167,6 +111,10 @@ void MainScene::OnAttach()
         layoutBuilder.Add(0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        layoutBuilder.Add(3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        layoutBuilder.Add(4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+        layoutBuilder.Add(5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+
         layout = layoutBuilder.Build(*m_device, VK_SHADER_STAGE_ALL);
     }
 
@@ -188,7 +136,8 @@ void MainScene::OnAttach()
     VkShaderModule fullscreenShader = loadShader("data/shaders/fullscreen.vert.spv");
     VkShaderModule primaryShader = loadShader("data/shaders/primary.frag.spv");
     VkShaderModule compositeShader = loadShader("data/shaders/composite.frag.spv");
-    VkShaderModule denoisingShader = loadShader("data/shaders/denoise.comp.spv");
+    VkShaderModule averagingShader = loadShader("data/shaders/average.comp.spv");
+    //VkShaderModule blurShader = loadShader("data/shaders/blur.frag.spv");
 
     /* Create primary pipeline */
     {
@@ -198,7 +147,8 @@ void MainScene::OnAttach()
         pipelineBuilder.AddFragmentShader(primaryShader);
         //pipelineBuilder.AddColorAttachment({ m_frames[0].primaryImage.GetFormat() });
         pipelineBuilder.AddColorAttachment({ m_frames[0].voxelImage.GetFormat() });
-        pipelineBuilder.AddColorAttachment({ m_frames[0].normalImage.GetFormat() });        
+        pipelineBuilder.AddColorAttachment({ m_frames[0].normalImage.GetFormat() });
+        pipelineBuilder.AddColorAttachment({ m_frames[0].radianceImage.GetFormat() });
 
         pipelineBuilder.AddDescriptorLayout(layout);
         pipelineBuilder.AddPushConstantRange({
@@ -208,6 +158,26 @@ void MainScene::OnAttach()
 
         m_primaryPass = pipelineBuilder.Build(*m_device);
     }
+
+#if 0
+    /* Create blur pipeline */
+    {
+        PipelineBuilder pipelineBuilder;
+
+        pipelineBuilder.AddVertexShader(fullscreenShader);
+        pipelineBuilder.AddFragmentShader(blurShader);
+        pipelineBuilder.AddColorAttachment({ m_frames[0].blurImage.GetFormat() });
+
+        pipelineBuilder.AddDescriptorLayout(layout);
+        pipelineBuilder.AddPushConstantRange({
+            .stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT,
+            .size = sizeof(PushConstants),
+        });
+
+        m_blurPass = pipelineBuilder.Build(*m_device);
+    }
+#endif
+
 
     /* Create composite pipeline */
     {
@@ -234,11 +204,11 @@ void MainScene::OnAttach()
         };
         
         ComputePipelineDesc desc = {
-            .ShaderModule = denoisingShader,
+            .ShaderModule = averagingShader,
             .PushConstantRanges = pcRanges,
         };
 
-        m_denoisingPass = CreateComputePipeline(*m_device, desc);
+        m_averagingPass = CreateComputePipeline(*m_device, desc);
     }
 
     vkDestroyShaderModule(*m_device, fullscreenShader, nullptr);
@@ -247,7 +217,9 @@ void MainScene::OnAttach()
 
     /* Storage buffers */
     {
-        const size_t size = sizeof(SVNode) * m_svt.GetNodes().size() + sizeof(Voxel) * m_svt.GetVoxels().size();
+        const size_t size = 
+            sizeof(SVNode) * (m_svt.GetNodes().size() + 2048) + 
+            sizeof(Voxel) * (m_svt.GetVoxels().size() + 8192);
 
         m_svtBuffer.gpu = m_device->CreateBuffer({
             .Size = size,
@@ -282,6 +254,15 @@ void MainScene::OnAttach()
             .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
             .RequiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
         });
+
+        m_paletteBuffer = m_device->CreateBuffer({
+            .Size = sizeof(m_palette[0]) * m_palette.size(),
+            .Usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            .AllocFlags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT,
+            .AllocType = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            .RequiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+        });
+        updatePalette();
     }
 
     {
@@ -319,6 +300,14 @@ void MainScene::OnAttach()
 
     m_currentVHM = 0;
     m_prevVHM = m_currentVHM + VHM_BUFFER_SIZE;
+
+    m_ambientLight = Vec3(0.8);
+    m_sunLight = Vec3(0.5);
+
+    m_sunElevation = glm::radians(75.0f);
+    m_sunAzimuth = glm::radians(90.0f);
+//    m_sunElevation = glm::radians(50.0f);
+//    m_sunAzimuth = glm::radians(140.0f);
 }
 
 
@@ -370,7 +359,7 @@ void MainScene::OnUpdate(f32 dt)
         if (glfwGetKey(m_app->GetWindow(), GLFW_KEY_LEFT_SHIFT))
             upward = -1.0f;
 
-        m_camera.pos += 40.0f * (forward * m_camera.dir + right * cameraRight + upward * upAxis) * dt;
+        m_camera.pos += 80.0f * (forward * m_camera.dir + right * cameraRight + upward * upAxis) * dt;
     }
 
 
@@ -395,6 +384,16 @@ void MainScene::OnUpdate(f32 dt)
         ImGui::End();
     }
 
+    ImGui::Begin("Lighting");
+
+    ImGui::ColorEdit3("Ambient light", &m_ambientLight[0], ImGuiColorEditFlags_DisplayHSV);
+    ImGui::ColorEdit3("Sun light", &m_sunLight[0], ImGuiColorEditFlags_DisplayHSV);
+
+    ImGui::SliderAngle("Sun elevation", &m_sunElevation, 0.0f, 90.0f);
+    ImGui::SliderAngle("Sun azimuth", &m_sunAzimuth, 90.0f, 270.0f);
+
+    ImGui::End();
+
 
     ImGui::Render();
 }
@@ -404,10 +403,20 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
 {
     Frame& frame = m_frames[m_swapChain->GetCurrentFrameIndex()];
 
-    std::swap(m_currentVHM, m_prevVHM);
+    //std::swap(m_currentVHM, m_prevVHM);
 
     PushConstants pc;
     {
+        pc.AmbientLight = Vec4(m_ambientLight, 0.0f);
+        pc.SunLight = Vec4(m_sunLight, 0.0f);
+
+        pc.SunDir.x = cos(m_sunElevation) * sin(m_sunAzimuth);
+        pc.SunDir.y = cos(m_sunElevation) * cos(m_sunAzimuth);
+        pc.SunDir.z = sin(m_sunElevation);
+        pc.SunDir.w = 0.0f;
+        pc.SunDir = glm::normalize(pc.SunDir);
+        //Vec3(0.2570805518921551, 0.0, 0.9663899781345132);
+
         pc.CameraPos = Vec4(m_camera.pos, 0.0f);
         pc.CameraDir = Vec4(m_camera.dir, 0.0f);
 
@@ -419,6 +428,7 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         pc.VoxelMap.nodes = m_svtBuffer.gpu.GetDeviceAddress();
         pc.VoxelMap.voxels = pc.VoxelMap.nodes + sizeof(SVNode) * m_svt.GetNodes().size();
         pc.VoxelMap.depth = m_svt.GetDepth();
+        pc.VoxelMap.voxelCount = m_svt.GetVoxels().size();
 
 
         pc.CurrentVHM.keys = m_vhmBuffer.GetDeviceAddress() + m_currentVHM;
@@ -432,30 +442,50 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
     {
         m_swapChain->WaitForPreviousFrames();
       
-        const size_t k_dataSize = sizeof(SVNode) * m_svt.GetNodes().size() + sizeof(Voxel) * m_svt.GetVoxels().size();
-        static byte *data = nullptr;
-        if (!data) data = new byte[k_dataSize];
-
-        {
-            auto srcNodes = m_svt.GetNodes();
-            auto srcVoxels = m_svt.GetVoxels();
-
-            SVNode *dstNodes = (SVNode*)data;
-            Voxel *dstVoxels = (Voxel*)(dstNodes + srcNodes.size());
-
-            memcpy(dstNodes, srcNodes.data(), sizeof(SVNode) * srcNodes.size());
-            memcpy(dstVoxels, srcVoxels.data(), sizeof(Voxel) * srcVoxels.size());
-
-            m_device->Write(&m_svtBuffer.cpu, 0, data, k_dataSize);
-        }
+        writeSVT(&m_svtBuffer.cpu);
 
         cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
 
         cmdBuffer.Barrier({
             .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
+            .NextAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
             .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
-            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,            
+            .NextStage = VK_PIPELINE_STAGE_TRANSFER_BIT,            
+        }, &m_svtBuffer.gpu);
+
+
+        cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM, VHM_SIZE * 4, 0xffffffff);
+        cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM + VHM_SIZE * 4, VHM_SIZE * 32, 0);
+
+        cmdBuffer.Barrier({
+
+            .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,            
+        }, &m_vhmBuffer);
+    }
+
+    if (m_svtModified)
+    {
+        m_svtModified = false;
+        m_swapChain->WaitForPreviousFrames();
+
+        writeSVT(&m_svtBuffer.cpu);
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .NextAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .NextStage = VK_PIPELINE_STAGE_TRANSFER_BIT,          
+        }, &m_svtBuffer.gpu);
+
+        cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,            
         }, &m_svtBuffer.gpu);
     }
 
@@ -470,7 +500,10 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
            // writer.Write(0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, frame.perFrameData);
             writer.Write(0, frame.voxelImage, m_sampler);
             writer.Write(1, frame.normalImage, m_sampler);
-            writer.Write(2, m_stbnImage, m_sampler);    
+            writer.Write(2, m_stbnImage, m_sampler);
+            writer.Write(3, frame.radianceImage, m_sampler);
+            writer.Write(4, frame.blurImage, m_sampler);
+            writer.Write(5, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, m_paletteBuffer);
 
             //writer.Write(1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, m_svtBuffer.gpu);
             //writer.Write(2, frame.primaryImage, m_sampler);
@@ -478,6 +511,7 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         writer.Update(*m_device);
     }
 
+    #if 0
     {
         cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM, VHM_SIZE * 4, 0xffffffff);
         cmdBuffer.Fill(&m_vhmBuffer, m_currentVHM + VHM_SIZE * 4, VHM_SIZE * 16, 0);
@@ -490,6 +524,14 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
             .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,            
         }, &m_vhmBuffer);
     }
+    #else
+    {
+        cmdBuffer.Barrier({
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,            
+        }, &m_vhmBuffer);  
+    }
+    #endif
 
     /* Primary pass */
     {
@@ -509,7 +551,11 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
             {
                 .Image = &frame.normalImage,
                 .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
-            },            
+            },
+            {
+                .Image = &frame.radianceImage,
+                .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
+            },         
         };
 
         cmdBuffer.BeginRenderPass(renderPass);
@@ -520,37 +566,6 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
         vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
 
         cmdBuffer.EndRenderPass();
-    }
-
-    {
-        MemoryBarrier barrier = {
-            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-            .PrevStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-            .NextStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-        };
-
-        cmdBuffer.Barrier(barrier, &m_vhmBuffer);
-    }
-
-    /* Compute pass */
-    {
-        //vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_denoisingPass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
-        vkCmdPushConstants(cmdBuffer, m_denoisingPass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
-        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_denoisingPass);
-
-        vkCmdDispatch(cmdBuffer, VHM_SIZE / 1024, 1, 1);
-    }
-
-    {
-        MemoryBarrier barrier = {
-            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
-            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
-            .PrevStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-        };
-
-        cmdBuffer.Barrier(barrier, &m_vhmBuffer);
     }
 
     /* Transition images */
@@ -564,13 +579,78 @@ void MainScene::OnRender(Image& dstImage, CommandBuffer& cmdBuffer)
 
         cmdBuffer.Barrier(barrier, &frame.voxelImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         cmdBuffer.Barrier(barrier, &frame.normalImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        cmdBuffer.Barrier(barrier, &frame.radianceImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
+
+#if 0
+    {
+        RenderPass renderPass;
+        renderPass.Area = frame.blurImage.GetArea(),
+        renderPass.Attachments = { 
+            {
+                .Image = &frame.blurImage,
+                .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
+            },         
+        };
+
+        cmdBuffer.BeginRenderPass(renderPass);
+
+        vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_blurPass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
+        vkCmdPushConstants(cmdBuffer, m_blurPass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
+        vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_blurPass);
+        vkCmdDraw(cmdBuffer, 3, 1, 0, 0);
+
+        cmdBuffer.EndRenderPass();        
+    }
+
+    {
+        MemoryBarrier barrier = {
+            .PrevAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        };
+
+        cmdBuffer.Barrier(barrier, &frame.blurImage, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);        
+    }
+#endif
+
+#if 1
+    if (m_frameNum % 64 == 0)
+    {
+        m_swapChain->WaitForPreviousFrames();
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+        }, &m_vhmBuffer);
+
+        /* Compute pass */
+        {
+            //vkCmdBindDescriptorSets(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_averagingPass.Layout, 0, 1, &frame.descriptorSet, 0, nullptr);
+            vkCmdPushConstants(cmdBuffer, m_averagingPass.Layout, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(PushConstants), &pc);
+            vkCmdBindPipeline(cmdBuffer, VK_PIPELINE_BIND_POINT_COMPUTE, m_averagingPass);
+
+            vkCmdDispatch(cmdBuffer, VHM_SIZE / 1024, 1, 1);
+        }
+
+        cmdBuffer.Barrier({
+            .PrevAccess = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT,
+            .NextAccess = VK_ACCESS_SHADER_READ_BIT,
+            .PrevStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            .NextStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+        }, &m_vhmBuffer);
+    }
+#endif
+
 
     /* Composite pass */
     {
         Attachment mainAttachment = {
             .Image = &dstImage,
-            .ClearValue = { VkClearColorValue{ 0.0f, 0.0f, 0.0f, 1.0f } },
+            .ClearValue = { VkClearColorValue{ 0.525f, 0.804f, 0.918f, 1.0f } },
         };
 
         RenderPass renderPass;
@@ -614,6 +694,49 @@ bool MainScene::OnKeyEvent(int key, int scancode, int action)
         else    
             glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
     }
+
+    if (key == GLFW_KEY_R && action == GLFW_PRESS)
+    {
+        Vec3u pos = glm::min(Vec3u(glm::max(m_camera.pos, Vec3(0))), m_svt.GetDimensions());
+        Vec3u size = Vec3u(2);
+
+        m_svt.Modify(pos, pos + size, Voxel{1});
+        m_svtModified = true;
+    }
+
+    if (false)
+    {
+        //Vec3u pos = glm::min(Vec3u(glm::max(m_camera.pos, Vec3(0))), m_svt.GetDimensions());
+
+        Vec3u pos = Vec3u(341, 206, 201);
+        Vec3u size = Vec3u(2);
+
+        m_svt.Modify(pos, pos + size, Voxel{203});
+        //LOG_TRACE("Voxels = {}", m_svt.GetVoxels().size());
+        m_swapChain->WaitForPreviousFrames();
+
+        writeSVT(&m_svtBuffer.cpu);
+
+        m_device->Submit([&](CommandBuffer cmdBuffer)
+        {
+            /*
+            cmdBuffer.Barrier({
+                .PrevAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                .NextAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .NextStage = VK_PIPELINE_STAGE_TRANSFER_BIT,          
+            }, &m_svtBuffer.gpu);*/
+
+            cmdBuffer.Copy(&m_svtBuffer.cpu, &m_svtBuffer.gpu);
+/*
+            cmdBuffer.Barrier({
+                .PrevAccess = VK_ACCESS_TRANSFER_WRITE_BIT,
+                .NextAccess = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT,
+                .PrevStage = VK_PIPELINE_STAGE_TRANSFER_BIT,
+                .NextStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,            
+            }, &m_svtBuffer.gpu);*/
+        });
+    }
+
     return false;
 }
 
@@ -639,6 +762,83 @@ void MainScene::OnMouseMovedEvent(Vec2 pos)
         };
         m_camera.dir = direction;
     }
+}
+
+
+void MainScene::loadMap(std::string path)
+{
+    const std::string svtPath = path + ".svt";
+    const std::string voxPath = path + ".vox";
+
+    bool loaded = false;
+    std::ifstream svtFile(svtPath, std::ios::in | std::ios::binary);
+
+    if (svtFile.good())
+    {
+        loaded = m_svt.Load(svtFile);
+        if (!loaded)
+            LOG_ERROR("Failed to load '{}'", svtPath);
+
+        svtFile.close();
+    }
+
+    if (true)
+    {
+        auto voxData = FileSystem::ReadFile(voxPath);
+
+        if (voxData)
+        {
+            auto *scene = ogt_vox_read_scene(voxData->data(), voxData->size());
+
+            for (int i = 0; i < 256; i++)
+            {
+                memcpy(m_palette[i].color, scene->palette.color + i, 4);
+                m_palette[i].emission = scene->materials.matl[i].emit * 10.0f;
+            }
+
+            if (path == "data/nuke")
+            {
+                m_palette[216].emission = 10.0f;
+            }
+            
+            if (!loaded)
+            {
+                VoxelArray voxels;
+                VoxLoader::Load(scene, &voxels);
+                m_svt = SVTree(voxels);
+
+                std::ofstream outputFile(svtPath, std::ios::out | std::ios::binary);
+                m_svt.Dump(outputFile);
+            }
+        }
+    }
+
+    LOG_TRACE("SVT nodes  = {}", m_svt.GetNodes().size());
+    LOG_TRACE("SVT voxels = {}", m_svt.GetVoxels().size());
+    LOG_TRACE("SVT depth  = {}", m_svt.GetDepth());
+    LOG_TRACE("SVT size   = {} x {} x {}", m_svt.GetDimensions().x, m_svt.GetDimensions().y, m_svt.GetDimensions().z);
+}
+
+
+void MainScene::writeSVT(Buffer *svtBuffer)
+{
+    const size_t dataSize = 
+        sizeof(SVNode) * m_svt.GetNodes().size() + 
+        sizeof(Voxel) * m_svt.GetVoxels().size();
+
+    static std::vector<byte> data;
+    data.resize(dataSize);
+
+    auto srcNodes = m_svt.GetNodes();
+    auto srcVoxels = m_svt.GetVoxels();
+
+    SVNode *dstNodes = (SVNode*)&data[0];
+    Voxel *dstVoxels = (Voxel*)(dstNodes + srcNodes.size());
+
+    memcpy(dstNodes, srcNodes.data(), sizeof(SVNode) * srcNodes.size());
+    memcpy(dstVoxels, srcVoxels.data(), sizeof(Voxel) * srcVoxels.size());
+
+    m_device->Write(svtBuffer, 0, &data[0], dataSize);
 }
 
 
@@ -677,7 +877,31 @@ void MainScene::createImages(int width, int height)
             .MipLevels = 1,
             .ViewType = VK_IMAGE_VIEW_TYPE_2D,
         });
+
+        frame.radianceImage = m_device->CreateImage({
+            .Type = VK_IMAGE_TYPE_2D,
+            .Format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .Size = { (uint32_t)width, (uint32_t)height, 1 },
+            .MipLevels = 1,
+            .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+        });
+
+        frame.blurImage = m_device->CreateImage({
+            .Type = VK_IMAGE_TYPE_2D,
+            .Format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .Usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .Size = { (uint32_t)width, (uint32_t)height, 1 },
+            .MipLevels = 1,
+            .ViewType = VK_IMAGE_VIEW_TYPE_2D,
+        });
     }
+}
+
+
+void MainScene::updatePalette()
+{
+    m_device->UploadBuffer(&m_paletteBuffer, 0, m_palette.data(), m_palette.size() * sizeof(m_palette[0]));
 }
 
 

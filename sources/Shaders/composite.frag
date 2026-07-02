@@ -13,30 +13,72 @@ layout(location = 0) out vec4 FragColor;
 
 
 
+vec3 GetSunLight(uvec3 voxelPos, vec3 normal);
+
+
+const vec3 kSunDir = vec3(0.2570805518921551, 0.0, 0.9663899781345132);
+
 void main()
 {
-    vec2 uv = v_FragPos;
+    ivec2 uv = ivec2(v_FragPos * pc.Resolution);
 
-    uvec4 voxel = texture(samplerVoxel, uv);
+    uvec4 voxel = texelFetch(samplerVoxel, uv, 0);
     uint voxelPtr = voxel.w;
 
     if (voxelPtr == 0xffffffff)
         discard;
 
     uvec3 voxelPos = voxel.xyz;
-    vec3 normal = 2.0 * texture(samplerNormal, uv).xyz - 1.0;
+    vec3 normal = 2.0 * texelFetch(samplerNormal, uv, 0).xyz - 1.0;
 
 
     uint voxelFace = GetVoxelFaceKey(voxelPtr, normal);
-    vec3 irradiance = VHM_Lookup(pc.CurrentVHM, voxelFace).rgb;
+    VHData voxelValue = VHM_Lookup(pc.CurrentVHM, voxelFace);
+    vec3 irradiance = voxelValue.radiance.rgb / voxelValue.radiance.w;
+    float sunLight = voxelValue.sun / voxelValue.radiance.w;
 
 
-    uint material = pc.VoxelMap.pVoxels.v[min(voxelPtr, 82530)];
-    if (material == 246 || material == 254 || material == 255)
+    vec3 ambient = irradiance;
+    ambient += sunLight * pc.SunLight.rgb;//GetSunLight(voxelPos, normal);
+
+    uint index = pc.VoxelMap.pVoxels.v[min(voxelPtr, pc.VoxelMap.voxelCount)];
+    Material material = u_Palette[index];
+    vec3 baseColor = (vec3(material.color.rgb) / 255.0);
+
+    //vec3 color = 1.0 * ambient;
+    vec3 color = mix(baseColor * ambient, baseColor + 0.1, float(material.emission != 0.0f));
+
+    
+    //if (material == 246 || material == 254 || material == 255)
+    //{
+    //    FragColor = vec4(1.0, 0.0, 0.0, 1.0);
+    //    return;
+    //}
+
+    //vec3 test = texelFetch(samplerRadiance, uv, 0).rgb;
+
+    //FragColor = vec4(voxelValue.radiance.w / 4096.0, 0, 0, 1.0);
+    FragColor = vec4(color, 1.0);
+}
+
+
+
+vec3 GetSunLight(uvec3 voxelPos, vec3 normal)
+{
+    vec3 sunDir = vec3(0.2570805518921551, 0.0, 0.9663899781345132);
+
+    if (abs(dot(sunDir, normal)) >= 0.01)
     {
-        FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-        return;
-    }
+        vec3 rayPos = (vec3(voxelPos) + 0.5) + 0.500030517578125 * normal;
 
-    FragColor = vec4(irradiance, 1.0);
+        uvec3 hitVoxelPos;
+        uint hitVoxelPtr;
+        vec3 hitNormal;
+        vec3 hitPos;
+        if (!RayTrace(pc.VoxelMap, rayPos, sunDir, hitVoxelPos, hitVoxelPtr, hitNormal, hitPos))
+        {
+            return vec3(1.0);
+        }
+    }
+    return vec3(0.0);
 }

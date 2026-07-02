@@ -57,7 +57,7 @@ bool Application::Run()
 
 
     m_device.Init(m_window, true);
-    m_swapChain.Init(m_window, 1);
+    m_swapChain.Init(m_window, 2);
 
     PushScene(std::make_shared<MainScene>());
 

@@ -155,6 +155,32 @@ void CommandBuffer::Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDevi
 }
 
 
+/*
+void CommandBuffer::Barrier2(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset, VkDeviceSize size)
+{
+    const VkBufferMemoryBarrier2 bufferMemoryBarrier {
+        .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+        .srcStageMask = barrier.PrevStage,
+        .srcAccessMask = barrier.PrevAccess,
+        .dstStageMask = barrier.NextStage,
+        .dstAccessMask = barrier.NextAccess,
+        .buffer = *buffer,
+        .offset = offset,
+        .size = size,
+    };
+
+    VkDependencyInfo dependency = {
+        .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+        .bufferMemoryBarrierCount = 1,
+        .pBufferMemoryBarriers = &bufferMemoryBarrier,
+    };
+
+    vkCmdPipelineBarrier2(m_handle, &dependency);
+    buffer->m_currentStage = barrier.NextStage;
+}
+*/
+
+
 void CommandBuffer::Barrier(const MemoryBarrier& barrier, Image* image, VkImageLayout newLayout)
 {
     const VkImageMemoryBarrier imageMemoryBarrier {
@@ -210,19 +236,24 @@ void CommandBuffer::Copy(const Buffer *src, Buffer *dst)
 
 void CommandBuffer::Copy(const Buffer *src, Buffer *dst, size_t numBytes)
 {
-    ASSERT((src->GetUsage() & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0);
-    ASSERT((dst->GetUsage() & VK_BUFFER_USAGE_TRANSFER_DST_BIT) != 0);
-
-    ASSERT(numBytes <= src->GetSize());
-    ASSERT(numBytes <= dst->GetSize());
-
     VkBufferCopy copy = { 
         .srcOffset = 0, 
         .dstOffset = 0, 
         .size = numBytes,
     };
-    vkCmdCopyBuffer(m_handle, *src, *dst, 1, &copy);
+    Copy(src, dst, copy);
+}
 
+
+void CommandBuffer::Copy(const Buffer *src, Buffer *dst, VkBufferCopy copy)
+{
+    ASSERT((src->GetUsage() & VK_BUFFER_USAGE_TRANSFER_SRC_BIT) != 0);
+    ASSERT((dst->GetUsage() & VK_BUFFER_USAGE_TRANSFER_DST_BIT) != 0);
+
+    ASSERT(copy.size <= src->GetSize());
+    ASSERT(copy.size <= dst->GetSize());
+
+    vkCmdCopyBuffer(m_handle, *src, *dst, 1, &copy);
     dst->m_currentStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 }
 

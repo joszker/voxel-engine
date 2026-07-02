@@ -52,6 +52,8 @@ set(sources
     ${SOURCE_DIR}/Renderer/CommandBuffer.cpp
     ${SOURCE_DIR}/Voxel/SVTree.h
     ${SOURCE_DIR}/Voxel/SVTree.cpp
+    ${SOURCE_DIR}/Voxel/VoxLoader.h
+    ${SOURCE_DIR}/Voxel/VoxLoader.cpp
 )
 
 
