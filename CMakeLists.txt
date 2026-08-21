@@ -36,6 +36,8 @@ set(sources
     ${SOURCE_DIR}/Demo/Scene.cpp
     ${SOURCE_DIR}/Demo/MainScene.h
     ${SOURCE_DIR}/Demo/MainScene.cpp
+    ${SOURCE_DIR}/Demo/imgfx.h
+    ${SOURCE_DIR}/Demo/imgfx.cpp
     ${SOURCE_DIR}/Renderer/RenderDevice.h
     ${SOURCE_DIR}/Renderer/RenderDevice.cpp
     ${SOURCE_DIR}/Renderer/SwapChain.h
@@ -52,8 +54,12 @@ set(sources
     ${SOURCE_DIR}/Renderer/CommandBuffer.cpp
     ${SOURCE_DIR}/Voxel/SVTree.h
     ${SOURCE_DIR}/Voxel/SVTree.cpp
+    ${SOURCE_DIR}/Voxel/SVBuilder.h
+    ${SOURCE_DIR}/Voxel/SVBuilder.cpp
     ${SOURCE_DIR}/Voxel/VoxLoader.h
     ${SOURCE_DIR}/Voxel/VoxLoader.cpp
+    ${SOURCE_DIR}/Voxel/RayTrace.h
+    ${SOURCE_DIR}/Voxel/RayTrace.cpp
 )
 
 

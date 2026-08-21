@@ -5,10 +5,14 @@
 #include "Renderer/Buffer.h"
 #include "Voxel/SVTree.h"
 
+#include <atomic>
+#include <memory>
+#include <future>
+
 
 struct alignas(16) Material
 {
-    u8 color[4];
+    Vec4u8 color;
     float emission;
 };
 
@@ -29,10 +33,11 @@ public:
     void OnResizeEvent(int width, int height) override;
     bool OnKeyEvent(int key, int scancode, int action) override;
     void OnMouseMovedEvent(Vec2 pos) override;
-
+    bool OnMouseButtonEvent(int button, int action) override;
 
 private:
     void loadMap(std::string path);
+    void loadModel(std::string path, VoxelArray* model);
 
     void writeSVT(Buffer *svtBuffer);
 
@@ -44,10 +49,13 @@ private:
     void initImGui();
     void deinitImGui();
 
+    void handleMouseClick(bool buttonL, bool buttonR);
+
 private:
     Pipeline m_primaryPass{};
     Pipeline m_blurPass{};
     Pipeline m_averagingPass{};
+    Pipeline m_purgePip;
     Pipeline m_compositePass{};
 
     VkSampler m_sampler{};
@@ -79,7 +87,8 @@ private:
         Image voxelImage;
         Image normalImage;
         Image radianceImage;
-        Image blurImage;
+        //Image blurImage;
+        Image specularSunImage;
     };
     std::vector<Frame> m_frames;
 
@@ -92,19 +101,46 @@ private:
         Vec3 dir;
         f32 yaw;
         f32 pitch;
+        Mat4 projection;
     } m_camera{};
 
 
-    uint m_fps;
-    uint m_frameCounter;
-    f64 m_prevFpsTime;
-    uint m_frameNum = 0;
-    std::array<Material, 256> m_palette;
+    f64 m_prevTime;
+    u32 m_frameNum = 0;
+    u32 m_fps = 0;
+    std::array<Material, 256> m_palette{};
+    uint m_selectedMaterial = 255;
+    bool m_paletteChanged = false;
 
     Vec3 m_ambientLight;
     Vec3 m_sunLight;
     float m_sunElevation;
     float m_sunAzimuth;
+    float m_sunConeAngle;
+    Vec3 m_skyColor;
 
     bool m_svtModified = false;
+    bool m_svtLoad = false;
+
+    bool m_mouseButtonPressed = false;
+    f32 m_mouseTimer = 0.0f;
+    bool m_purge = false;
+    u32 m_gen;
+
+    struct VoxelObject
+    {
+        std::atomic<bool> Loaded;   // TODO: atomic<int> Status
+        std::string Name;
+        VoxelArray Voxels;
+
+        VoxelObject() = default;
+        VoxelObject(std::string name) : Name(name) {}
+
+        bool IsLoaded() { return Loaded.load(); }
+    };
+    std::vector<std::unique_ptr<VoxelObject>> m_objects;
+    VoxelObject *m_selectedObject = nullptr;
+    std::future<void> m_objectLoader;
+    std::atomic<bool> m_objectIsLoading;
+    bool m_editMode = true;
 };

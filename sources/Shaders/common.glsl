@@ -1,7 +1,9 @@
 
 
 
-#include "svtrace.glsl"
+#include "svtree.glsl"
+#include "svmarch.glsl"
+//#include "svtest/svtraceA.glsl"
 #include "hashmap.glsl"
 
 
@@ -16,17 +18,19 @@ struct Material
 layout(push_constant, std430) uniform PushConstants
 {
     vec4 AmbientLight;
-    vec4 SunDir;
+    vec3 SunDir;
+    float SunConeThetaCos;
     vec4 SunLight;
 
     vec4 CameraPos;
     vec4 CameraDir;
     vec2 Resolution;
     uint FrameNo;
+    uint CurrentGen;
 
     SV_Tree VoxelMap;
     VoxelHashMap CurrentVHM;
-    VoxelHashMap PrevVHM;    
+    VoxelHashMap BackupVHM;    
 
 } pc;
 
@@ -34,7 +38,7 @@ layout(binding = 0) uniform usampler2D samplerVoxel;
 layout(binding = 1) uniform sampler2D samplerNormal;
 layout(binding = 2) uniform sampler2D samplerSTBN;
 layout(binding = 3) uniform sampler2D samplerRadiance;
-layout(binding = 4) uniform sampler2D samplerRadianceBlurred;
+layout(binding = 4) uniform sampler2D samplerSpecularSun;
 
 
 layout (binding = 5) uniform Palette

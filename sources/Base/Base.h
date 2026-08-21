@@ -107,10 +107,12 @@
 #include <array>
 #include <vector>
 #include <span>
+#include <string>
 #include <string_view>
 #include <stdint.h>
 #include <bit>
 #include <optional>
+#include <format>
 
 
 // Integer types
@@ -148,6 +150,7 @@ namespace Debug
 
 
 #include <glm/matrix.hpp>
+#include <glm/gtx/vec_swizzle.hpp>
 
 
 using Vec2 = glm::vec2;
@@ -161,6 +164,8 @@ using Vec4i = glm::vec<4, s32, glm::defaultp>;
 using Vec2u = glm::vec<2, u32, glm::defaultp>;
 using Vec3u = glm::vec<3, u32, glm::defaultp>;
 using Vec4u = glm::vec<4, u32, glm::defaultp>;
+
+using Vec4u8 = glm::vec<4, u8, glm::defaultp>;
 
 
 inline constexpr u32 Dot(Vec3u const& a, Vec3u const& b)
@@ -178,7 +183,7 @@ inline u64 popcnt64(u64 x)
 #elif COMPILER_GCC || COMPILER_CLANG
     return __builtin_popcountll(x)
 #else
-    #error "popcnt64: Not implemented!"
+    return std::popcount(x);
 #endif
 }
 
@@ -214,3 +219,37 @@ inline u32 NextPowerOf2(u32 x)
 #endif
 }
 
+
+inline std::string FmtBytes(size_t size)
+{
+    if (size < 1024)
+        return std::format("{:.2f} B", f64(size));
+    if (size < 1048576)
+        return std::format("{:.2f} KB", f64(size) / 1024.0);
+    if (size < 1073741824)
+        return std::format("{:.2f} MB", f64(size) / 1048576.0);
+    if (size < 1099511627776)
+        return std::format("{:.2f} GB", f64(size) / 1073741824.0);
+
+    return std::format("{:.2f} TB", f64(size) / 1099511627776.0);
+}
+
+
+/*
+template <>
+struct std::formatter<Vec2> : std::formatter<string_view> {
+    auto format(const Vec2& vec, std::format_context& ctx) const {
+        std::string temp;
+        std::format_to(std::back_inserter(temp), "({}, {})", vec.x, vec.y);
+        return std::formatter<string_view>::format(temp, ctx);
+    }
+};*/
+
+template <typename T>
+struct std::formatter<glm::vec<3, T, glm::defaultp>> : std::formatter<string_view> {
+    auto format(const glm::vec<3, T, glm::defaultp>& vec, std::format_context& ctx) const {
+        std::string temp;
+        std::format_to(std::back_inserter(temp), "({}, {}, {})", vec.x, vec.y, vec.z);
+        return std::formatter<string_view>::format(temp, ctx);
+    }
+};

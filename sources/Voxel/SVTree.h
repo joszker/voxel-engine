@@ -68,13 +68,6 @@ struct SVNode
     u32 ChildrenPtr : 31;   // Relative pointer to the first child.
     u64 ChildMask;          // Children occupancy bitmask.
 
-
-    // Creates a new empty node.
-    inline static SVNode Empty(bool isLeaf)
-    {
-        return { .IsLeaf = isLeaf, .ChildrenPtr = 0, .ChildMask = 0 };
-    }
-
     inline bool IsEmpty() const
     {
         return ChildMask == 0;
@@ -89,9 +82,10 @@ struct SVNode
 
     inline uintptr_t GetChildPtr(uint index) const
     {
+        // e.g.
         // ChildMask = 00000010000011000001000101
-        //              ^     ^^     ^   ^ ^
-        //              5     43     2   1 0
+        //                   ^     ^^     ^   ^ ^
+        //                   5     43     2   1 0
         ASSERT(index < 64);
         return u64(ChildrenPtr) + popcnt64(ChildMask & ((1ull << index) - 1));
     }
@@ -169,6 +163,9 @@ public:
     Voxel Get(Vec3u index) const;
 
     void Modify(Vec3u min, Vec3u max, Voxel voxel);
+    void Modify(Vec3u min, const VoxelArray& voxels);
+
+    void Subtract(Vec3u min, const VoxelArray& mask);
 
     bool Dump(std::ostream& output);
     bool Load(std::istream& input);
@@ -184,12 +181,20 @@ private:
     SVNode makeEmptyNode();
 
     void modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel voxel);
-
     SVNode create(u32 level, Vec3u min, Vec3u max, Voxel voxel);
+
+    void modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& voxels);
+    SVNode create(u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& voxels);
+
+    bool subtract(uintptr_t parentPtr, uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& voxels);
+
+    void deleteChild(uintptr_t nodePtr, u32 childIndex);
 
 private:
     Vec3u m_dimensions;
     u32 m_numLevels;
     std::vector<SVNode> m_nodes;
     std::vector<Voxel> m_voxels;
+
+    friend class SVBuilder;
 };

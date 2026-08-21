@@ -1,5 +1,6 @@
 #include "SVTree.h"
 #include "Base/IO.h"
+#include "Base/Log.h"
 
 #include <glm/gtx/component_wise.hpp>
 #include <glm/vector_relational.hpp>
@@ -60,7 +61,7 @@ SVNode SVTree::insertArray(const VoxelArray& array, Vec3u offset, u32 level)
     }
     else
     {
-        // scale == the size of each node, at the current level
+        // scale == the size of each node at the current level
         u32 scale = pow4(level);        // 4^{level}
 
         std::array<SVNode, 64> nodes;   // child nodes
@@ -174,8 +175,23 @@ void SVTree::Modify(Vec3u min, Vec3u max, Voxel voxel)
     if (glm::any(glm::greaterThanEqual(min, max)))
         return;
 
+    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
+    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+
     modify(0, m_numLevels - 1, min, max, voxel);
 }
+
+
+void SVTree::Modify(Vec3u min, const VoxelArray& voxels)
+{
+    Vec3u max = min + voxels.Size;
+ 
+    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
+    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+
+    modify(0, m_numLevels - 1, min, max, Vec3u(0), voxels);
+}
+
 
 void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel voxel)
 {
@@ -298,6 +314,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
     }
 }
 
+// NOTE: always returns non-empty node
 SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Voxel voxel)
 {
     u32 scale = pow4(level);
@@ -325,6 +342,7 @@ SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Voxel voxel)
                 }
             }
         }
+        ASSERT(nodeMask != 0);
         return insertNodes({ nodes.data(), nodeCount }, nodeMask);
     }
     else
@@ -344,9 +362,212 @@ SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Voxel voxel)
                 }
             }
         }
+        ASSERT(voxelMask != 0);
         return insertVoxels({ voxels.data(), voxelCount }, voxelMask);
     }
 }
+
+
+void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& srcVoxels)
+{
+    u32 scale = pow4(level);
+
+    SVNode node = m_nodes[nodePtr];
+    if (!node.IsLeaf)
+    {
+        Vec3u localMin = glm::min(min / scale, Vec3u(3));
+        Vec3u localMax = glm::min((max - 1u) / scale, Vec3u(3)) + 1u;
+
+        u64 modifyMask = 0;
+        for (u32 z = localMin.z; z < localMax.z; z++)
+            for (u32 y = localMin.y; y < localMax.y; y++)
+                for (u32 x = localMin.x; x < localMax.x; x++)
+                    modifyMask |= 1ull << u64(SVNode::Index1DFrom3D({ x, y, z }));
+
+
+        if ((node.ChildMask & modifyMask) == modifyMask)
+        {
+            /* Every node that has to be modified already exists */
+
+            for (u32 z = localMin.z; z < localMax.z; z++)
+            {
+                for (u32 y = localMin.y; y < localMax.y; y++)
+                {
+                    for (u32 x = localMin.x; x < localMax.x; x++)
+                    {
+                        u32 index = SVNode::Index1DFrom3D({ x, y, z });
+
+                        Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
+                        Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
+
+                        if ((modifyMask >> index) & 1)
+                        {
+                            Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
+                            Vec3u newOffset = offset + iMin - min;//offset + scale * (Vec3u(x, y, z) - localMin);
+
+                            modify(node.GetChildPtr(index), level - 1, newMin, newMax, newOffset, srcVoxels);
+                        }
+                    }
+                }
+            }
+        }
+        else
+        {
+            /* Some of the nodes have to be created */
+
+            std::array<SVNode, 64> children{};
+            u32 srcIndex = 0;
+            u32 dstIndex = 0;
+            u64 nodeMask = node.ChildMask;
+
+            for (u32 bit = 0; bit < 64; bit++)
+            {
+                Vec3u pos = (bit >> Vec3u(0, 2, 4)) & 3u;
+
+                Vec3u newMin = glm::max(min, pos * scale) & (scale - 1);
+                Vec3u newMax = ((glm::min(max, (pos + 1u) * scale) - 1u) & (scale - 1)) + 1u;
+
+                Vec3u iMin = glm::max(min, pos * scale);
+                Vec3u newOffset = offset + iMin - min;//offset + scale * (pos - localMin);
+                
+                if (node.IsOccupied(bit))
+                {
+                    uintptr_t childPtr = node.ChildrenPtr + srcIndex++;
+                    if ((modifyMask >> bit) & 1)
+                    {
+                        modify(childPtr, level - 1, newMin, newMax, newOffset, srcVoxels);
+                    }
+                    children[dstIndex++] = m_nodes[childPtr];
+                }
+                else if ((modifyMask >> u64(bit)) & 1)
+                {
+                    SVNode childNode = create(level - 1, newMin, newMax, newOffset, srcVoxels);
+                    if (!childNode.IsEmpty())
+                    {
+                        nodeMask |= (1ull << u64(bit));
+                        children[dstIndex++] = childNode;
+                    }
+                }
+            }
+
+            m_nodes[nodePtr] = insertNodes({ children.data(), dstIndex }, nodeMask);
+        }
+    }
+    else
+    {
+        u64 modifyMask = 0;
+        for (u32 z = min.z; z < max.z; z++)
+        {
+            for (u32 y = min.y; y < max.y; y++)
+            {
+                for (u32 x = min.x; x < max.x; x++)
+                {
+                    if (srcVoxels.Get(Vec3u(x, y, z) - min + offset).idx != 0)
+                        modifyMask |= 1ull << u64(SVNode::Index1DFrom3D({ x, y, z }));
+                }
+            }
+        }
+
+        if (node.ChildMask == modifyMask)
+        {
+            u32 dstIndex = 0;
+
+            for (u32 bit = 0; bit < 64; bit++)
+            {
+                if (node.IsOccupied(bit))
+                {
+                    Vec3u srcIndex = ((bit >> Vec3u(0, 2, 4)) & 3u) - min;
+                    m_voxels[node.ChildrenPtr + dstIndex] = srcVoxels.Get(srcIndex + offset);
+                }
+            }
+            LOG_WARNING("EZ");
+        }
+        else if (modifyMask != 0)
+        {
+            std::array<Voxel, 64> voxels{};
+            u32 dstIndex = 0;
+
+            for (u32 bit = 0; bit < 64; bit++)
+            {
+                if ((modifyMask >> bit) & 1)
+                {
+                    Vec3u srcIndex = ((bit >> Vec3u(0, 2, 4)) & 3u) - min;
+                    voxels[dstIndex++] = srcVoxels.Get(srcIndex + offset);
+                }
+                else if ((node.ChildMask >> bit) & 1)
+                {
+                    voxels[dstIndex++] = m_voxels[node.GetChildPtr(bit)]; 
+                }
+            }
+
+            m_nodes[nodePtr] = insertVoxels({ voxels.data(), dstIndex }, node.ChildMask | modifyMask);
+        }
+    }
+}
+
+// IMPORTANT: may return an empty node
+SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& srcVoxels)
+{
+    u32 scale = pow4(level);
+
+    if (level > 0)
+    {
+        u64 nodeMask = 0;
+        uint nodeCount = 0;
+        std::array<SVNode, 64> nodes{};
+
+        Vec3u localMin = glm::min(min / scale, Vec3u(3));
+        Vec3u localMax = glm::min((max - 1u) / scale, Vec3u(3)) + 1u;
+
+        for (u32 z = localMin.z; z < localMax.z; z++)
+        {
+            for (u32 y = localMin.y; y < localMax.y; y++)
+            {
+                for (u32 x = localMin.x; x < localMax.x; x++)
+                {
+                    Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
+                    Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
+
+                    Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
+                    Vec3u newOffset = offset + iMin - min;//offset + scale * (Vec3u(x, y, z) - localMin);
+                    
+                    SVNode childNode = create(level - 1, newMin, newMax, newOffset, srcVoxels);
+                    if (!childNode.IsEmpty())
+                    {
+                        nodes[nodeCount++] = childNode;
+                        nodeMask |= 1ull << u64(SVNode::Index1DFrom3D({ x, y, z }));
+                    }
+                }
+            }
+        }
+        return insertNodes({ nodes.data(), nodeCount }, nodeMask);
+    }
+    else
+    {
+        u64 voxelMask = 0;
+        uint voxelCount = 0;
+        std::array<Voxel, 64> voxels{};
+
+        for (u32 z = min.z; z < max.z; z++)
+        {
+            for (u32 y = min.y; y < max.y; y++)
+            {
+                for (u32 x = min.x; x < max.x; x++)
+                {
+                    Voxel voxel = srcVoxels.Get(Vec3u(x, y, z) - min + offset);
+                    
+                    if (voxel)
+                    {
+                        voxels[voxelCount++] = voxel;
+                        voxelMask |= 1ull << u64(SVNode::Index1DFrom3D({ x, y, z }));
+                    }
+                }
+            }
+        }
+        return insertVoxels({ voxels.data(), voxelCount }, voxelMask);
+    }
+}
+
 
 bool SVTree::Dump(std::ostream& output)
 {
@@ -404,4 +625,132 @@ bool SVTree::Load(std::istream& input)
         return false;
 
     return true;
+}
+
+
+void SVTree::Subtract(Vec3u min, const VoxelArray& mask)
+{
+    Vec3u max = min + mask.Size;
+ 
+    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
+    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+
+    subtract(UINTPTR_MAX, 0, m_numLevels - 1, min, max, Vec3u(0), mask);
+}
+
+
+bool SVTree::subtract(uintptr_t parentPtr, uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u offset, const VoxelArray& mask)
+{
+    SVNode node = m_nodes[nodePtr];
+
+    if (level > 0)
+    {
+        u32 scale = pow4(level);
+
+        Vec3u localMin = glm::min(min / scale, Vec3u(3));
+        Vec3u localMax = glm::min((max - 1u) / scale, Vec3u(3)) + 1u;
+
+        u32 originalChildrenCount = node.GetChildrenCount();
+        bool anyRemoved = false;
+
+        for (u32 z = localMin.z; z < localMax.z; z++)
+        {
+            for (u32 y = localMin.y; y < localMax.y; y++)
+            {
+                for (u32 x = localMin.x; x < localMax.x; x++)
+                {
+                    u32 index = SVNode::Index1DFrom3D({ x, y, z });
+
+                    if (node.IsOccupied(index))
+                    {
+                        Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
+                        Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
+
+                        Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
+                        Vec3u newOffset = offset + iMin - min;
+                        
+                        uintptr_t childPtr = node.GetChildPtr(index);
+                        if (subtract(nodePtr, childPtr, level - 1, newMin, newMax, newOffset, mask))
+                        {
+                            anyRemoved = true;
+                            m_nodes[nodePtr].ChildMask &= ~(1ull << u64(index));
+                            //deleteChild(nodePtr, index);
+                        }
+                    }
+                }
+            }
+        }
+
+        if (anyRemoved)
+        {
+            // Remove all empty nodes
+            u32 srcPtr = node.ChildrenPtr;
+            u32 dstPtr = srcPtr;
+            while (srcPtr < node.ChildrenPtr + originalChildrenCount)
+            {
+                if (m_nodes[srcPtr].IsEmpty())
+                    srcPtr++;
+                else
+                    m_nodes[dstPtr++] = m_nodes[srcPtr++]; 
+            }
+        }
+    }
+    else
+    {
+        u32 originalVoxelCount = node.GetChildrenCount();
+
+        for (u32 z = min.z; z < max.z; z++)
+        {
+            for (u32 y = min.y; y < max.y; y++)
+            {
+                for (u32 x = min.x; x < max.x; x++)
+                {
+                    Vec3u dstPos = Vec3u(x, y, z);
+                    u32 dstIndex = SVNode::Index1DFrom3D(dstPos);
+
+                    Vec3u srcPos = Vec3u(x, y, z) - min + offset;
+                    //u32 srcIndex = 0;
+                    
+                    if (node.IsOccupied(dstIndex) && mask.Get(srcPos))
+                    {
+                        m_nodes[nodePtr].ChildMask &= ~(1ull << u64(dstIndex));
+
+                        // Mark as "deleted"; remove later
+                        m_voxels[node.GetChildPtr(dstIndex)].idx = 0;
+                    }
+                }
+            }
+        }
+
+        // Remove all zero voxels
+        u32 srcPtr = node.ChildrenPtr;
+        u32 dstPtr = srcPtr;
+        while (srcPtr < node.ChildrenPtr + originalVoxelCount)
+        {
+            if (m_voxels[srcPtr].idx == 0)
+                srcPtr++;
+            else
+                m_voxels[dstPtr++] = m_voxels[srcPtr++]; 
+        }
+    }
+
+
+
+    return m_nodes[nodePtr].IsEmpty();
+}
+
+
+void SVTree::deleteChild(uintptr_t nodePtr, u32 childIndex)
+{
+    SVNode node = m_nodes[nodePtr];
+    if (!node.IsLeaf)
+    {
+        uintptr_t childPtr = node.GetChildPtr(childIndex);
+        uintptr_t childrenCount = node.GetChildrenCount();
+        uintptr_t moveCount = childrenCount - (childPtr - node.ChildrenPtr) - 1;
+
+        memmove(m_nodes.data() + childPtr, m_nodes.data() + childPtr + 1, moveCount * sizeof(SVNode));
+
+        m_nodes[nodePtr].ChildMask &= ~(1ull << u64(childIndex));
+    }
 }

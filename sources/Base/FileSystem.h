@@ -5,6 +5,7 @@
 #include <vector>
 #include <string_view>
 #include <fstream>
+#include <filesystem>
 
 
 namespace FileSystem
@@ -47,4 +48,10 @@ namespace FileSystem
         return std::move(data);
     }
 
+
+    /* Returns whether file or directory exists/is accessible */
+    inline bool Exists(std::string_view path)
+    {
+        return std::filesystem::exists(path);
+    }
 }

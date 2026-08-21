@@ -18,47 +18,48 @@
 
 
 
-namespace Log
+namespace Log 
 {
-    struct Sink
+    
+struct Sink
+{
+    std::ostream* stream{};
+    std::string_view tmfmt = "%H:%M:%S";
+    std::string_view fmt = "[%T] %?";
+    int level = 0;
+    bool flush = false;
+};
+
+
+class Logger
+{
+public:
+    Logger();
+
+    void SetLevel(int level);
+    void AddSink(const Sink& sink);
+
+    template <typename... Types>
+    inline void Message(int level, const char *file, unsigned line, std::string_view fmt, Types&&... args)
     {
-        std::ostream* stream{};
-        std::string_view tmfmt = "%H:%M:%S";
-        std::string_view fmt = "[%T] %?";
-        int level = 0;
-        bool flush = false;
-    };
+        m_message.clear();
+        std::vformat_to(std::back_inserter(m_message), fmt, std::make_format_args(args...));
+        Emit(level, file, line);
+    }
+
+private:
+    void Emit(int level, std::string filePath, unsigned line);
+
+private:
+    int m_level;
+    std::string m_message;
+    std::string m_buffer;
+    std::vector<Sink> m_sinks;
+};
 
 
-    class Logger
-    {
-    public:
-        Logger();
-
-        void SetLevel(int level);
-        void AddSink(const Sink& sink);
-
-        template <typename... Types>
-        inline void Message(int level, const char *file, unsigned line, std::string_view fmt, Types&&... args)
-        {
-            m_message.clear();
-            std::vformat_to(std::back_inserter(m_message), fmt, std::make_format_args(args...));
-            Emit(level, file, line);
-        }
-
-    private:
-        void Emit(int level, std::string filePath, unsigned line);
-
-    private:
-        int m_level;
-        std::string m_message;
-        std::string m_buffer;
-        std::vector<Sink> m_sinks;
-    };
-
-
-    void Init();
-    Logger& GetMainLogger();
+void Init();
+Logger& GetMainLogger();
 }
 
 

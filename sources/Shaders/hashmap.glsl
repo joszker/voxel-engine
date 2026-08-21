@@ -2,8 +2,8 @@ struct VHData
 {
     vec4 radiance;
     float sun;
-    uint frame;
-    uint data1;
+    uint frame;             // last update frame
+    uint gen;
     uint data2;
 };
 
@@ -28,6 +28,8 @@ struct VoxelHashMap
 #define VHM_BUFFER_SIZE     16777216
 
 
+//#define VHM_SAMPLE_LIMIT    4096
+
 #define VHM_SAMPLE_LIMIT    524288
 //#define VHM_SAMPLE_LIMIT    16384
 //#define VHM_SAMPLE_LIMIT    1024
@@ -47,7 +49,7 @@ uint Hash(uint k, uint n)
 
 
 
-void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample, float sun, uint frame)
+void VHM_AddSample(VoxelHashMap vhm, uint key, vec4 radianceSample, float sun, uint frame)
 {
     uint slot = Hash(key, VHM_BUFFER_SIZE);
 
@@ -59,10 +61,14 @@ void VHM_AddSample(VoxelHashMap vhm, uint key, vec3 radianceSample, float sun, u
         {
             if (vhm.values.at[slot].radiance.w < VHM_SAMPLE_LIMIT)
             {
+                //float gain = mix(1.0, 1.00024420024, float(sampleCount > VHM_SAMPLE_LIMIT));
+                //radianceSample *= gain;
+                //sun *= gain;
+
                 atomicAdd(vhm.values.at[slot].radiance.r, radianceSample.r);
                 atomicAdd(vhm.values.at[slot].radiance.g, radianceSample.g);
                 atomicAdd(vhm.values.at[slot].radiance.b, radianceSample.b);
-                atomicAdd(vhm.values.at[slot].radiance.w, 1.0);
+                atomicAdd(vhm.values.at[slot].radiance.w, radianceSample.w);
 
                 atomicAdd(vhm.values.at[slot].sun, sun);
             }
@@ -105,15 +111,35 @@ VHData VHM_Lookup(VoxelHashMap vhm, uint key)
         }
         if (vhm.keys.at[slot] == VHM_EMPTY_KEY)
         {
-            return VHData(vec4(0, 1, 0, 1), 0, 0, 0, 0);
+            return VHData(vec4(0,1,0,1), 0, 0, 0, 0);
+            //return VHData(vec4[](vec4(0,1,0,1), vec4(0)), 0, 0, 0, 0);
         }
 
         slot += 1;
         slot &= VHM_BUFFER_SIZE - 1;
     }
-    return VHData(vec4(0, 0, 0, 2048), 0, 0, 0, 0);
+    return VHData(vec4(0,1,0,1), 0, 0, 0, 0);
+    //return VHData(vec4[](vec4(1,0,0,1), vec4(0)), 0, 0, 0, 0);
 }
 
+
+void VHM_Copy(VoxelHashMap vhm, uint key, VHData data)
+{
+    uint slot = Hash(key, VHM_BUFFER_SIZE);
+
+    for (uint i = 0; i < 1024; i++)
+    {
+        uint prevKey = atomicCompSwap(vhm.keys.at[slot], VHM_EMPTY_KEY, key);
+
+        if (prevKey == VHM_EMPTY_KEY || prevKey == key)
+        {
+            vhm.values.at[slot] = data;
+            return;
+        }
+        slot += 1;
+        slot &= VHM_BUFFER_SIZE - 1;
+    }    
+}
 
 
 /*

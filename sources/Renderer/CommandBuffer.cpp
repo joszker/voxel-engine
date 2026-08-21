@@ -139,7 +139,7 @@ void CommandBuffer::Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDevi
 
     if (barrier.PrevStage != 0)
     {
-        ASSERT(barrier.PrevStage == currentStage);
+        ASSERT((barrier.PrevStage & currentStage) != 0);
     }
 
     vkCmdPipelineBarrier(
