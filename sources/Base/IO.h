@@ -18,6 +18,16 @@ inline bool ReadU8(std::istream& is, u8 *dst)
 }
 
 
+inline bool ReadChar(std::istream& is, char *dst)
+{
+    char value = is.get();
+    if (is.fail()) return false;
+
+    *dst = value;
+    return true;
+}
+
+
 inline bool ReadU16(std::istream& is, u16 *dst)
 {
     u16 value;

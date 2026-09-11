@@ -206,7 +206,19 @@ SVBuilder::Level SVBuilder::BuildLeafLevel(const VoxelArray& array, u32 scale, s
 
             for (size_t workIndex = begin; workIndex < end; workIndex++)
             {
-                
+                /*
+                if (workIndex == begin)
+                    LOG_INFO("Thread #{}: 0%", threadIndex);
+
+                if (workIndex == begin + (end - begin) / 4)
+                    LOG_INFO("Thread #{}: 25%", threadIndex);
+
+                if (workIndex == begin + (end - begin) / 2)
+                    LOG_INFO("Thread #{}: 50%", threadIndex);
+
+                if (workIndex == begin + 3 * (end - begin) / 4)
+                    LOG_INFO("Thread #{}: 75%", threadIndex);*/
+
                 /* Decode the spatial coordinate from the grouped ordering. */
                 const Vec3u coord = CoordinateFromOrderingKey(
                     workIndex,
@@ -273,11 +285,13 @@ SVBuilder::Level SVBuilder::BuildLeafLevel(const VoxelArray& array, u32 scale, s
                 output.nodes.push_back(node);
                 output.coords.push_back(coord);
             }
+            //LOG_INFO("Thread #{}: 100%", threadIndex);
         });
     }
     for (auto& thread : threads)
         thread.join();
 
+    //LOG_INFO("Merge outputs");
     /*
         Merge thread outputs.
 
@@ -317,6 +331,7 @@ SVBuilder::Level SVBuilder::BuildLeafLevel(const VoxelArray& array, u32 scale, s
         }
     }
 
+    //LOG_INFO("Build lookup");
     BuildLookup(level);
 
     return level;

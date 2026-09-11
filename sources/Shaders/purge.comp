@@ -11,26 +11,6 @@
 
 layout(local_size_x = 1024, local_size_y = 1, local_size_z = 1) in;
 
-/*
-void main()
-{
-    uint index = gl_GlobalInvocationID.x;
-
-    if (index >= VHM_BUFFER_SIZE)
-        return;
-
-    if (pc.CurrentVHM.keys.at[index] == VHM_EMPTY_KEY)
-        return;
-
-    uint key = pc.CurrentVHM.keys.at[index];
-    VHData data = pc.CurrentVHM.values.at[index];
-
-    if (pc.FrameNo - data.frame <= 2048)
-    {
-        // only keep relatively fresh entries
-        VHM_Copy(pc.BackupVHM, key, data);
-    }
-}*/
 
 void main()
 {
@@ -45,9 +25,11 @@ void main()
     uint key = pc.CurrentVHM.keys.at[index];
     VHData data = pc.CurrentVHM.values.at[index];
 
-    if (pc.FrameNo - data.frame <= 2048)
+    // Keep entries newer than:
+    uint frameCutoff = min(pc.FramesPerSecond * 10, 2500);
+    if (pc.FrameNo - data.frame <= frameCutoff)
     {
-        // only keep relatively fresh entries
+        // Only keep relatively fresh entries
         VHM_Copy(pc.BackupVHM, key, data);
     }
 }

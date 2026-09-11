@@ -4,7 +4,7 @@
 
 
 
-TEST_CASE("empty 0x0x0", "[svt]")
+TEST_CASE("empty 0", "[svt]")
 {
     SVTree tree({ {}, Vec3u(0, 0, 0) });
 

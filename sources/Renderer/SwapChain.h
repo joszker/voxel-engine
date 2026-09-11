@@ -4,13 +4,15 @@
 #include "CommandBuffer.h"
 
 
-
+/*
+    Swap chain. Handles cpu-gpu synchronization and supports multiple frames in flight.
+*/
 class SwapChain
 {
 public:
     SwapChain(RenderDevice& device);
 
-    void Init(struct GLFWwindow* window, uint32_t maxFramesInFlight);
+    void Init(struct GLFWwindow* window, uint32_t maxFramesInFlight, bool vsync);
     void Recreate();
 
     Image* AcquireImage(CommandBuffer *cmdBuffer);
@@ -55,4 +57,6 @@ private:
     std::vector<Frame> m_frames;
     uint32_t m_frameIndex;
     uint32_t m_imageIndex;
+    bool m_vsync;
+    bool m_suboptimal;
 };

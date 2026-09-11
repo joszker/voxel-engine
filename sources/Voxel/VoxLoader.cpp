@@ -13,31 +13,23 @@
 
 
 
-struct Int3
-{
-    int x, y, z;
-};
 
 struct Bounds
 {
-    Int3 min;
-    Int3 max;
+    Vec3i min;
+    Vec3i max;
 };
 
-static inline size_t FlattenIndex(
-    int x, int y, int z,
-    int sizeX, int sizeY, int sizeZ)
+static inline size_t FlattenIndex(int x, int y, int z, int sizeX, int sizeY, int sizeZ)
 {
-    return static_cast<size_t>(x)
-         + static_cast<size_t>(y) * sizeX
-         + static_cast<size_t>(z) * sizeX * sizeY;
+    return size_t(x) + size_t(y) * sizeX + size_t(z) * sizeX * sizeY;
 }
 
 
 
 // Returns:
 //      worldPos = rotation * localPos + translation
-static Int3 TransformPoint(
+static Vec3i TransformPoint(
     const ogt_vox_transform& t,
     int x,
     int y,
@@ -46,9 +38,9 @@ static Int3 TransformPoint(
     int sizeY,
     int sizeZ)
 {
-    const float fx = static_cast<float>(x);
-    const float fy = static_cast<float>(y);
-    const float fz = static_cast<float>(z);
+    const float fx = float(x);
+    const float fy = float(y);
+    const float fz = float(z);
 
     const float szx = std::floor(float(sizeX) * 0.5f) + 1.0f;
     const float szy = std::floor(float(sizeY) * 0.5f) + 1.0f;
@@ -58,25 +50,28 @@ static Int3 TransformPoint(
     const float sy = t.m01 * szx + t.m11 * szy + t.m21 * szz;
     const float sz = t.m02 * szx + t.m12 * szy + t.m22 * szz;
 
-    Int3 out;
+    Vec3i out;
 
-    out.x = static_cast<int>(std::truncf(
+    out.x = int(std::truncf(
         t.m00 * fx +
         t.m10 * fy +
         t.m20 * fz +
-        t.m30 - sx));
+        t.m30 - sx)
+    );
 
-    out.y = static_cast<int>(std::truncf(
+    out.y = int(std::truncf(
         t.m01 * fx +
         t.m11 * fy +
         t.m21 * fz +
-        t.m31 - sy));
+        t.m31 - sy)
+    );
 
-    out.z = static_cast<int>(std::truncf(
+    out.z = int(std::truncf(
         t.m02 * fx +
         t.m12 * fy +
         t.m22 * fz +
-        t.m32 - sz));
+        t.m32 - sz)
+    );
 
     return out;
 }
@@ -85,16 +80,12 @@ static Int3 TransformPoint(
 // Compose transforms.
 // Returns: 
 //      result = parent * child
-static ogt_vox_transform Compose(
-    const ogt_vox_transform& parent,
-    const ogt_vox_transform& child)
+static ogt_vox_transform Compose(const ogt_vox_transform& parent, const ogt_vox_transform& child)
 {
     return ogt_vox_transform_multiply(parent, child);
 }
 
-static bool IsGroupVisible(
-    const ogt_vox_scene* scene,
-    uint32_t groupIndex)
+static bool IsGroupVisible(const ogt_vox_scene* scene, u32 groupIndex)
 {
     while (groupIndex != k_invalid_group_index)
     {
@@ -113,14 +104,12 @@ static bool IsGroupVisible(
 }
 
 
-static ogt_vox_transform GetWorldGroupTransform(
-    const ogt_vox_scene* scene,
-    uint32_t groupIndex)
+static ogt_vox_transform GetWorldGroupTransform(const ogt_vox_scene* scene, u32 groupIndex)
 {
     ogt_vox_transform world =
         ogt_vox_transform_get_identity();
 
-    std::vector<uint32_t> chain;
+    std::vector<u32> chain;
 
     while (groupIndex != k_invalid_group_index)
     {
@@ -141,9 +130,9 @@ static ogt_vox_transform GetWorldGroupTransform(
 
 std::vector<Voxel> BuildVoxelGridFromScene(
     const ogt_vox_scene* scene,
-    uint32_t& outSizeX,
-    uint32_t& outSizeY,
-    uint32_t& outSizeZ)
+    u32& outSizeX,
+    u32& outSizeY,
+    u32& outSizeZ)
 {
     Bounds bounds;
 
@@ -164,7 +153,7 @@ std::vector<Voxel> BuildVoxelGridFromScene(
     // -------------------------------------------------------------------------
     // Pass 1: determine scene bounds
     // -------------------------------------------------------------------------
-    for (uint32_t i = 0; i < scene->num_instances; ++i)
+    for (u32 i = 0; i < scene->num_instances; ++i)
     {
         const ogt_vox_instance& inst = scene->instances[i];
 
@@ -186,11 +175,11 @@ std::vector<Voxel> BuildVoxelGridFromScene(
                 GetWorldGroupTransform(scene, inst.group_index),
                 inst.transform);
 
-        for (uint32_t z = 0; z < model->size_z; ++z)
+        for (u32 z = 0; z < model->size_z; ++z)
         {
-            for (uint32_t y = 0; y < model->size_y; ++y)
+            for (u32 y = 0; y < model->size_y; ++y)
             {
-                for (uint32_t x = 0; x < model->size_x; ++x)
+                for (u32 x = 0; x < model->size_x; ++x)
                 {
                     size_t srcIdx =
                         x +
@@ -200,11 +189,9 @@ std::vector<Voxel> BuildVoxelGridFromScene(
                     if (model->voxel_data[srcIdx] == 0)
                         continue;
 
-                    Int3 p = TransformPoint(
+                    Vec3i p = TransformPoint(
                         world,
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
+                        int(x), int(y), int(z),
                         model->size_x, model->size_y, model->size_z
                     );
 
@@ -224,16 +211,12 @@ std::vector<Voxel> BuildVoxelGridFromScene(
     outSizeY = bounds.max.y - bounds.min.y + 1;
     outSizeZ = bounds.max.z - bounds.min.z + 1;
 
-    std::vector<Voxel> grid(
-        static_cast<size_t>(outSizeX) *
-        static_cast<size_t>(outSizeY) *
-        static_cast<size_t>(outSizeZ),
-        Voxel{0});
+    std::vector<Voxel> grid(size_t(outSizeX) * size_t(outSizeY) * size_t(outSizeZ), Voxel{0});
 
     // -------------------------------------------------------------------------
     // Pass 2: write voxels
     // -------------------------------------------------------------------------
-    for (uint32_t i = 0; i < scene->num_instances; ++i)
+    for (u32 i = 0; i < scene->num_instances; ++i)
     {
         const ogt_vox_instance& inst = scene->instances[i];
 
@@ -255,28 +238,21 @@ std::vector<Voxel> BuildVoxelGridFromScene(
                 GetWorldGroupTransform(scene, inst.group_index),
                 inst.transform);
 
-        for (uint32_t z = 0; z < model->size_z; ++z)
+        for (u32 z = 0; z < model->size_z; ++z)
         {
-            for (uint32_t y = 0; y < model->size_y; ++y)
+            for (u32 y = 0; y < model->size_y; ++y)
             {
-                for (uint32_t x = 0; x < model->size_x; ++x)
+                for (u32 x = 0; x < model->size_x; ++x)
                 {
-                    size_t srcIdx =
-                        x +
-                        y * model->size_x +
-                        z * model->size_x * model->size_y;
+                    size_t srcIdx = x + y * model->size_x + z * model->size_x * model->size_y;
 
-                    uint8_t color =
-                        model->voxel_data[srcIdx];
-
+                    uint8_t color = model->voxel_data[srcIdx];
                     if (color == 0)
                         continue;
 
-                    Int3 p = TransformPoint(
+                    Vec3i p = TransformPoint(
                         world,
-                        static_cast<int>(x),
-                        static_cast<int>(y),
-                        static_cast<int>(z),
+                        int(x), int(y), int(z),
                         model->size_x, model->size_y, model->size_z
                     );
 
@@ -284,14 +260,13 @@ std::vector<Voxel> BuildVoxelGridFromScene(
                     int gy = p.y - bounds.min.y;
                     int gz = p.z - bounds.min.z;
 
-                    grid[
-                        FlattenIndex(
-                            gx,
-                            gy,
-                            gz,
-                            outSizeX,
-                            outSizeY,
-                            outSizeZ)] = Voxel{color};
+                    grid[FlattenIndex(
+                        gx,
+                        gy,
+                        gz,
+                        outSizeX,
+                        outSizeY,
+                        outSizeZ)] = Voxel{color};
                 }
             }
         }

@@ -27,7 +27,7 @@ struct Pipeline
 };
 
 
-
+/* Helper for creating graphics pipelines */
 class PipelineBuilder
 {
 public:

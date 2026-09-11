@@ -2,6 +2,8 @@
 #include "Base/Log.h"
 #include "Scene.h"
 #include "MainScene.h"
+#include "MenuScene.h"
+#include "ImGuiLayer.h"
 
 #include <GLFW/glfw3.h>
 
@@ -47,52 +49,65 @@ bool Application::Run()
         glfwSetKeyCallback(m_window, onKeyEvent);
         glfwSetMouseButtonCallback(m_window, onMouseButtonEvent);
         glfwSetCursorPosCallback(m_window, onMouseMovedEvent);
+        glfwSetScrollCallback(m_window, onScrollEvent);
     }
 
-    glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
-
     const u64 timerFreq = glfwGetTimerFrequency();
-    u64 prevTime = glfwGetTimerValue();
+    u64 previousTime = glfwGetTimerValue();
 
-
+#if _DEBUG
     m_device.Init(m_window, true);
-    m_swapChain.Init(m_window, 2);
+#else
+    m_device.Init(m_window, false);
+#endif
+ //   m_swapChain.Init(m_window, 1, true);    // 1 FIF + vsync
+    m_swapChain.Init(m_window, 1, false);   // 1 FIF
 
-    PushScene(std::make_shared<MainScene>());
+ //   m_swapChain.Init(m_window, 2, true);  // 2 FIF + vsync
+//    m_swapChain.Init(m_window, 2, false); // 2 FIF
+
+    ImGuiLayer::Init(*this);
+
+    PushScene(std::make_shared<MenuScene>());
+
+    constexpr f64 updatesPerSec = 60.0;
+    constexpr f64 deltaTime = 1.0 / updatesPerSec;
+    
 
     while (!glfwWindowShouldClose(m_window)) 
     {
         glfwPollEvents();
 
-        u64 currTime = glfwGetTimerValue();
-        f32 deltaTime = f32(currTime - prevTime) / f32(timerFreq);
-        prevTime = currTime;
+        u64 currentTime = glfwGetTimerValue();
+        f64 frameTime = f32(currentTime - previousTime) / f32(timerFreq);
+        frameTime = glm::min(frameTime, 0.25);
+        previousTime = currentTime;
 
         if (Scene* currentScene = getCurrentScene())
+            currentScene->OnUpdate(f32(frameTime));
+
+        CommandBuffer cmdBuffer;
+        Image* image = m_swapChain.AcquireImage(&cmdBuffer);
+        if (image)
         {
-            currentScene->OnUpdate(deltaTime);
+            cmdBuffer.Begin();
 
-            CommandBuffer cmdBuffer;
-            Image* image = m_swapChain.AcquireImage(&cmdBuffer);
-            if (image)
+            if (Scene* currentScene = getCurrentScene())
             {
-                cmdBuffer.Begin();
-                currentScene->OnRender(*image, cmdBuffer);
-
-                //MakeImagePresentable(cmdBuffer, *image);
-                cmdBuffer.Barrier({
-                    .PrevAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-                    .PrevStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
-                    .NextStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
-                }, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-
-                cmdBuffer.End();
-
-                m_swapChain.Submit(cmdBuffer);
-
-                m_swapChain.Present();
+                currentScene->OnRender(*image, cmdBuffer, 0.0f);
             }
+
+            cmdBuffer.Barrier({
+                .PrevAccess = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
+                .PrevStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+                .NextStage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,
+            }, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+            cmdBuffer.End();
+
+            m_swapChain.Submit(cmdBuffer);
+
+            m_swapChain.Present();
         }
     }
 
@@ -134,9 +149,17 @@ void Application::Transition(std::shared_ptr<Scene> scene)
 }
 
 
+void Application::SetCursorEnabled(bool enabled)
+{
+    glfwSetInputMode(m_window, GLFW_CURSOR, enabled ? GLFW_CURSOR_NORMAL : GLFW_CURSOR_DISABLED);
+}
+
+
 void Application::onResizeEvent(Window window, int width, int height)
 {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+    app->m_swapChain.Recreate();
 
     if (Scene* currentScene = app->getCurrentScene())
     {
@@ -148,6 +171,76 @@ void Application::onResizeEvent(Window window, int width, int height)
 void Application::onKeyEvent(Window window, int key, int scancode, int action, int mods)
 {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+    if (key == GLFW_KEY_F11 && action == GLFW_PRESS)
+    {
+        bool isFullscreen = glfwGetWindowMonitor(window);
+        bool hasBorders = glfwGetWindowAttrib(window, GLFW_DECORATED) == GLFW_TRUE;
+
+        if (isFullscreen)
+        {
+            // Restore windowed mode:
+            glfwSetWindowMonitor(
+                app->m_window, nullptr, 
+                app->m_windowPos.x, app->m_windowPos.y, app->m_windowSize.x, app->m_windowSize.y,
+                GLFW_DONT_CARE
+            );
+            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+        }
+        else if (GLFWmonitor *monitor = glfwGetPrimaryMonitor())
+        {
+            if (hasBorders)
+            {
+                // Save window placement:
+                glfwGetWindowPos(app->m_window, &app->m_windowPos.x, &app->m_windowPos.y);
+                glfwGetWindowSize(app->m_window, &app->m_windowSize.x, &app->m_windowSize.y);
+            }
+
+            int monitorX, monitorY, monitorW, monitorH;
+            glfwGetMonitorWorkarea(monitor, &monitorX, &monitorY, &monitorW, &monitorH);
+
+            glfwSetWindowMonitor(app->m_window, monitor, monitorX, monitorY, monitorW, monitorH, GLFW_DONT_CARE);
+        }
+        return;
+    }
+    else if (key == GLFW_KEY_F10 && action == GLFW_PRESS)
+    {
+        int monitorX, monitorY, monitorW, monitorH;
+        glfwGetMonitorWorkarea(glfwGetPrimaryMonitor(), &monitorX, &monitorY, &monitorW, &monitorH);
+
+        bool isFullscreen = glfwGetWindowMonitor(window);
+        bool hasBorders = glfwGetWindowAttrib(window, GLFW_DECORATED) == GLFW_TRUE;
+
+        if (isFullscreen)
+        {
+            glfwSetWindowMonitor(app->m_window, nullptr, monitorX, monitorY, monitorW, monitorH, GLFW_DONT_CARE);
+            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
+        }
+        else if (!isFullscreen && hasBorders)
+        {
+            // Save window placement:
+            glfwGetWindowPos(app->m_window, &app->m_windowPos.x, &app->m_windowPos.y);
+            glfwGetWindowSize(app->m_window, &app->m_windowSize.x, &app->m_windowSize.y);
+
+            // Set to work area:
+            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_FALSE);
+            glfwSetWindowPos(window, monitorX, monitorY);
+            glfwSetWindowSize(window, monitorW, monitorH);
+        } 
+        else
+        {
+            glfwSetWindowAttrib(window, GLFW_DECORATED, GLFW_TRUE);
+
+            // Restore window placement:
+            glfwSetWindowPos(window, app->m_windowPos.x, app->m_windowPos.y);
+            glfwSetWindowSize(window, app->m_windowSize.x, app->m_windowSize.y);
+        }
+    }
+    else if (key == GLFW_KEY_F9 && action == GLFW_PRESS)
+    {
+        glfwSetWindowSize(window, 1920, 1080);
+    }
+
 
     if (Scene* currentScene = app->getCurrentScene())
     {
@@ -167,13 +260,24 @@ void Application::onMouseButtonEvent(Window window, int button, int action, int 
 }
 
 
-void Application::onMouseMovedEvent(Window window, double xpos, double ypos)
+void Application::onMouseMovedEvent(Window window, double xPos, double yPos)
 {
     auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
 
     if (Scene* currentScene = app->getCurrentScene())
     {
-        currentScene->OnMouseMovedEvent(Vec2(float(xpos), float(ypos)));
+        currentScene->OnMouseMovedEvent(Vec2(float(xPos), float(yPos)));
+    }    
+}
+
+
+void Application::onScrollEvent(Window window, double xOffset, double yOffset)
+{
+    auto* app = reinterpret_cast<Application*>(glfwGetWindowUserPointer(window));
+
+    if (Scene* currentScene = app->getCurrentScene())
+    {
+        currentScene->OnMouseScrolledEvent(Vec2(float(xOffset), float(yOffset)));
     }    
 }
 

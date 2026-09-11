@@ -8,9 +8,11 @@
 #include <filesystem>
 
 
+/* File system realted utilities */
 namespace FileSystem
 {
-    inline std::optional<std::vector<byte>> ReadFile(std::string_view path)
+    /* Reads the entire file into memory */
+    inline Opt<std::vector<byte>> ReadFile(std::string_view path)
     {
         /* Open file stream with the stream position at the end */
         std::ifstream fs(path.data(), std::ios::ate | std::ios::binary);

@@ -1,5 +1,5 @@
 #pragma once
-#include "VkBase.h"
+#include "Vulkan.h"
 
 
 
@@ -60,7 +60,6 @@ public:
     void EndRenderPass();
 
     void Barrier(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
-    void Barrier2(const MemoryBarrier& barrier, Buffer* buffer, VkDeviceSize offset = 0, VkDeviceSize size = VK_WHOLE_SIZE);
     void Barrier(const MemoryBarrier& barrier, Image* image, VkImageLayout newLayout);
 
     void SetViewport(const VkViewport& viewport);

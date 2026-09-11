@@ -2,8 +2,23 @@
 #include <limits>
 #include <thread>
 
+
+/*
+    Used for building an `SVTree` from a `VoxelArray`.
+*/
 class SVBuilder
 {
+public:
+    explicit SVBuilder(u32 threadCount = 0)
+    {
+        if (threadCount == 0)
+            threadCount = std::max(1u, std::thread::hardware_concurrency());
+
+        m_threadCount = threadCount;
+    }
+
+    SVTree Build(const VoxelArray& array);
+
 private:
     static constexpr u32 INVALID_INDEX = UINT32_MAX;
 
@@ -22,7 +37,7 @@ private:
             Dense spatial lookup.
             `lookup[x + y * size.x + z * size.x * size.y]` gives the index into nodes/coords, or INVALID_INDEX.
         */
-        std::vector<uint32_t> lookup;   
+        std::vector<u32> lookup;   
 
         Vec3u size = { 0, 0, 0 };       //  Number of possible node positions in this level.
     };
@@ -33,24 +48,6 @@ private:
         std::vector<Vec3u> coords;
         std::vector<Voxel> voxels;
     };
-
-public:
-    explicit SVBuilder(
-        uint32_t threadCount = 0)
-    {
-        if (threadCount == 0)
-        {
-            threadCount =
-                std::max(
-                    1u,
-                    std::thread::hardware_concurrency());
-        }
-
-        m_threadCount = threadCount;
-    }
-
-    SVTree Build(
-        const VoxelArray& array);
 
 private:
     u32 m_threadCount;

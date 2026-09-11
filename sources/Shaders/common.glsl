@@ -3,7 +3,6 @@
 
 #include "svtree.glsl"
 #include "svmarch.glsl"
-//#include "svtest/svtraceA.glsl"
 #include "hashmap.glsl"
 
 
@@ -11,22 +10,28 @@ struct Material
 {
     u8vec4 color;
     float emission;
+    float specular;
 };
 
 
 
 layout(push_constant, std430) uniform PushConstants
 {
-    vec4 AmbientLight;
+    vec3 AmbientLight;
+    float AmbientFalloff;
     vec3 SunDir;
     float SunConeThetaCos;
-    vec4 SunLight;
+    vec3 SunLight;
+    float AmbientMinimum;
+    vec4 SkyColor;
 
     vec4 CameraPos;
-    vec4 CameraDir;
+    vec3 CameraDir;
+    float CameraFOV;
     vec2 Resolution;
     uint FrameNo;
-    uint CurrentGen;
+    uint Debug;
+    uint FramesPerSecond;
 
     SV_Tree VoxelMap;
     VoxelHashMap CurrentVHM;

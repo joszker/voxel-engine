@@ -147,9 +147,8 @@ public:
     /* Creates an empty tree */
     SVTree();
 
-    /* Creates a tree from voxel array */
+    /* Creates a tree from voxel array (for larger arrays `SVBuilder` should be used) */
     SVTree(const VoxelArray& array);
-
 
     inline Vec3u GetDimensions() const { return m_dimensions; }
     inline u32 GetDepth() const { return m_numLevels; }
@@ -160,25 +159,29 @@ public:
     std::span<const SVNode> GetNodes() const;
     std::span<const Voxel> GetVoxels() const;
 
-    Voxel Get(Vec3u index) const;
+    /* Gets the voxel value at the specified coordinates */
+    Voxel Get(Vec3u coords) const;
 
+    /* Modifies specified region additively */
     void Modify(Vec3u min, Vec3u max, Voxel voxel);
+
+    /* Modifies specified region additively */    
     void Modify(Vec3u min, const VoxelArray& voxels);
 
+    /* Modifies specified region subtractively */    
     void Subtract(Vec3u min, const VoxelArray& mask);
 
+    /* Serializes the entire tree data into an output stream */
     bool Dump(std::ostream& output);
+
+    /* Deserializes the entire tree from an input stream */    
     bool Load(std::istream& input);
 
 private:
     SVNode insertArray(const VoxelArray& array, Vec3u offset, u32 level);
-
-
     SVNode insertVoxels(std::span<Voxel> voxels, u64 voxelMask);
-
     SVNode insertNodes(std::span<SVNode> nodes, u64 nodeMask);
 
-    SVNode makeEmptyNode();
 
     void modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel voxel);
     SVNode create(u32 level, Vec3u min, Vec3u max, Voxel voxel);

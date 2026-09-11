@@ -175,8 +175,11 @@ void SVTree::Modify(Vec3u min, Vec3u max, Voxel voxel)
     if (glm::any(glm::greaterThanEqual(min, max)))
         return;
 
-    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
-    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+    if (!glm::all(glm::greaterThanEqual(min, Vec3u(0))))
+        return;
+
+    if (!glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))))
+        return;
 
     modify(0, m_numLevels - 1, min, max, voxel);
 }
@@ -186,8 +189,11 @@ void SVTree::Modify(Vec3u min, const VoxelArray& voxels)
 {
     Vec3u max = min + voxels.Size;
  
-    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
-    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+    if (!glm::all(glm::greaterThanEqual(min, Vec3u(0))))
+        return;
+
+    if (!glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))))
+        return;
 
     modify(0, m_numLevels - 1, min, max, Vec3u(0), voxels);
 }
@@ -200,6 +206,8 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
     SVNode node = m_nodes[nodePtr];
     if (!node.IsLeaf)
     {
+        /* Visit existing nodes and create new ones if necessary */
+
         Vec3u localMin = glm::min(min / scale, Vec3u(3));
         Vec3u localMax = glm::min((max - 1u) / scale, Vec3u(3)) + 1u;
 
@@ -212,7 +220,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
 
         if ((node.ChildMask & modifyMask) == modifyMask)
         {
-            /* Every node that has to be modified already exists*/
+            /* Every node that has to be modified already exists */
 
             for (u32 z = localMin.z; z < localMax.z; z++)
             {
@@ -221,7 +229,8 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
                     for (u32 x = localMin.x; x < localMax.x; x++)
                     {
                         u32 index = SVNode::Index1DFrom3D({ x, y, z });
-
+                        
+                        // Clip region to fit inside the child node:
                         Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
                         Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
 
@@ -232,19 +241,6 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
                     }
                 }
             }
-
-            /*
-            for (u32 index = 0; index < 64; index++)
-            {
-                Vec3u pos = (index >> Vec3u(0, 2, 4)) & 3u;
-                Vec3u newMin = min & (scale - 1);
-                Vec3u newMax = (glm::min(max - 1u, pos * 4u + 3u) & (scale - 1)) + 1u;
-
-                if ((modifyMask >> index) & 1)
-                {
-                    modify(node.GetChildPtr(index), level - 1, newMin, newMax, voxel);
-                }
-            }*/
         }
         else
         {
@@ -258,6 +254,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
             {
                 Vec3u pos = (bit >> Vec3u(0, 2, 4)) & 3u;
 
+                // Clip region to fit inside the child node:
                 Vec3u newMin = glm::max(min, pos * scale) & (scale - 1);
                 Vec3u newMax = ((glm::min(max, (pos + 1u) * scale) - 1u) & (scale - 1)) + 1u;
                 
@@ -276,6 +273,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Voxel vo
                 }
             }
 
+            // Recreate the current node:
             m_nodes[nodePtr] = insertNodes({ children.data(), dstIndex }, node.ChildMask | modifyMask);
         }
     }
@@ -334,6 +332,7 @@ SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Voxel voxel)
             {
                 for (u32 x = localMin.x; x < localMax.x; x++)
                 {
+                    // Clip region to fit inside the child node:
                     Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
                     Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
 
@@ -375,6 +374,8 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
     SVNode node = m_nodes[nodePtr];
     if (!node.IsLeaf)
     {
+        /* Visit existing nodes and create new ones if necessary */
+
         Vec3u localMin = glm::min(min / scale, Vec3u(3));
         Vec3u localMax = glm::min((max - 1u) / scale, Vec3u(3)) + 1u;
 
@@ -397,13 +398,13 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
                     {
                         u32 index = SVNode::Index1DFrom3D({ x, y, z });
 
+                        // Clip region to fit inside the child node:
                         Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
                         Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
 
                         if ((modifyMask >> index) & 1)
                         {
-                            Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
-                            Vec3u newOffset = offset + iMin - min;//offset + scale * (Vec3u(x, y, z) - localMin);
+                            Vec3u newOffset = offset + glm::max(min, Vec3u(x, y, z) * scale) - min;
 
                             modify(node.GetChildPtr(index), level - 1, newMin, newMax, newOffset, srcVoxels);
                         }
@@ -424,11 +425,10 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
             {
                 Vec3u pos = (bit >> Vec3u(0, 2, 4)) & 3u;
 
+                // Clip region to fit inside the child node:
                 Vec3u newMin = glm::max(min, pos * scale) & (scale - 1);
                 Vec3u newMax = ((glm::min(max, (pos + 1u) * scale) - 1u) & (scale - 1)) + 1u;
-
-                Vec3u iMin = glm::max(min, pos * scale);
-                Vec3u newOffset = offset + iMin - min;//offset + scale * (pos - localMin);
+                Vec3u newOffset = offset + glm::max(min, pos * scale) - min;
                 
                 if (node.IsOccupied(bit))
                 {
@@ -450,6 +450,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
                 }
             }
 
+            // Recreate the new node:
             m_nodes[nodePtr] = insertNodes({ children.data(), dstIndex }, nodeMask);
         }
     }
@@ -470,6 +471,7 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
 
         if (node.ChildMask == modifyMask)
         {
+            /* All voxels which have to be modified already exist. Simply replace them */
             u32 dstIndex = 0;
 
             for (u32 bit = 0; bit < 64; bit++)
@@ -480,10 +482,11 @@ void SVTree::modify(uintptr_t nodePtr, u32 level, Vec3u min, Vec3u max, Vec3u of
                     m_voxels[node.ChildrenPtr + dstIndex] = srcVoxels.Get(srcIndex + offset);
                 }
             }
-            LOG_WARNING("EZ");
         }
         else if (modifyMask != 0)
         {
+            /* New voxels must be added. Recreate the leaf node */
+
             std::array<Voxel, 64> voxels{};
             u32 dstIndex = 0;
 
@@ -525,11 +528,10 @@ SVNode SVTree::create(u32 level, Vec3u min, Vec3u max, Vec3u offset, const Voxel
             {
                 for (u32 x = localMin.x; x < localMax.x; x++)
                 {
+                    // Clip region to fit inside the child node:
                     Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
                     Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
-
-                    Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
-                    Vec3u newOffset = offset + iMin - min;//offset + scale * (Vec3u(x, y, z) - localMin);
+                    Vec3u newOffset = offset + glm::max(min, Vec3u(x, y, z) * scale) - min;
                     
                     SVNode childNode = create(level - 1, newMin, newMax, newOffset, srcVoxels);
                     if (!childNode.IsEmpty())
@@ -632,8 +634,11 @@ void SVTree::Subtract(Vec3u min, const VoxelArray& mask)
 {
     Vec3u max = min + mask.Size;
  
-    ASSERT(glm::all(glm::greaterThanEqual(min, Vec3u(0))));
-    ASSERT(glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))));
+    if (!glm::all(glm::greaterThanEqual(min, Vec3u(0))))
+        return;
+
+    if (!glm::all(glm::lessThanEqual(max, Vec3u(pow4(m_numLevels)))))
+        return;
 
     subtract(UINTPTR_MAX, 0, m_numLevels - 1, min, max, Vec3u(0), mask);
 }
@@ -663,11 +668,10 @@ bool SVTree::subtract(uintptr_t parentPtr, uintptr_t nodePtr, u32 level, Vec3u m
 
                     if (node.IsOccupied(index))
                     {
+                        // Clip region to fit inside the child node:
                         Vec3u newMin = glm::max(min, Vec3u(x, y, z) * scale) & (scale - 1);
                         Vec3u newMax = ((glm::min(max, (Vec3u(x, y, z) + 1u) * scale) - 1u) & (scale - 1)) + 1u;
-
-                        Vec3u iMin = glm::max(min, Vec3u(x, y, z) * scale);
-                        Vec3u newOffset = offset + iMin - min;
+                        Vec3u newOffset = offset + glm::max(min, Vec3u(x, y, z) * scale) - min;
                         
                         uintptr_t childPtr = node.GetChildPtr(index);
                         if (subtract(nodePtr, childPtr, level - 1, newMin, newMax, newOffset, mask))

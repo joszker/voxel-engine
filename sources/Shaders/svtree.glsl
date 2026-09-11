@@ -2,6 +2,7 @@ layout(buffer_reference) readonly buffer SVT_Nodes;
 layout(buffer_reference) readonly buffer SVT_Leafs;
 
 
+// Sparse voxel node
 struct SV_Node
 {
     // isLeaf       : 1-bit
@@ -10,6 +11,7 @@ struct SV_Node
     uint data[3];
 };
 
+// Sparse voxel tree
 struct SV_Tree
 {
     uint voxelCount;

@@ -7,6 +7,7 @@
 #include <format>
 #include <iterator>
 #include <ostream>
+#include <memory>
 #include <mutex>
 
 
@@ -17,10 +18,12 @@
 #define LOG_LEVEL_FATAL     4
 
 
-
+/* Basic logging system */
 namespace Log 
 {
-    
+
+
+/* Destination where log data is sent*/
 struct Sink
 {
     std::ostream* stream{};
@@ -28,6 +31,8 @@ struct Sink
     std::string_view fmt = "[%T] %?";
     int level = 0;
     bool flush = false;
+
+    Sink() {}
 };
 
 
@@ -55,6 +60,7 @@ private:
     std::string m_message;
     std::string m_buffer;
     std::vector<Sink> m_sinks;
+    std::mutex m_mutex;
 };
 
 

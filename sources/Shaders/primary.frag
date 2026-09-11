@@ -17,8 +17,6 @@ layout(location = 2) out vec4 Radiance;
 
 
 
-#define AMBIENT_COLOR   vec3(0.8)
-
 
 
 vec3 SampleHemisphere(vec2 uv);
@@ -34,13 +32,25 @@ float GoldNoise(in vec2 xy, in float seed)
 }
 
 
+vec3 GetNoise()
+{
+#if 0
+    float seed = uintBitsToFloat(0x3f800000 + ((pc.FrameNo % 32768u) << 8u)) - 1.0;
+    vec3 noise = vec3(
+        GoldNoise(v_FragPos * pc.Resolution.xy, seed + 0.1), 
+        GoldNoise(v_FragPos * pc.Resolution.xy, seed + 0.2),
+        GoldNoise(v_FragPos * pc.Resolution.xy, seed + 0.3)
+    );
+#else
+    hash_seed kernel = hash_seed(initHashSeed(uvec2(v_FragPos * pc.Resolution)), uint(pc.FrameNo));
+    vec3 noise = hash3(kernel, PRNG_FILTER);
+#endif
+    return noise;
+}
+
+
 void main()
 {
-//    vec2 offset = (vec2(float(pc.FrameNo % 31), float((pc.FrameNo / 31) % 31)) + 1.0) / 32.0;
-//    vec2 jitter = (offset - 0.5) / pc.Resolution;
-//    vec2 offset = (vec2(float(pc.FrameNo % 255), float((pc.FrameNo / 255) % 255)) + 1.0) / 256.0;
-//    vec2 jitter = (offset - 0.5) / pc.Resolution;
-
     vec3 cameraPos = pc.CameraPos.xyz;
     vec3 cameraDir = pc.CameraDir.xyz;
     vec3 cameraRight = -normalize(cross(vec3(0, 0, 1), cameraDir));
@@ -51,7 +61,7 @@ void main()
     vec3 cameraPlaneU = cameraRight;
     vec3 cameraPlaneV = cameraUp * (pc.Resolution.y / pc.Resolution.x);
 
-    float cameraFov = tan(0.5 * radians(90.0));
+    float cameraFov = tan(0.5 * pc.CameraFOV); // radians(90.0)
     vec3 rayDir = cameraDir + screenPos.x * cameraPlaneU * cameraFov + screenPos.y * cameraPlaneV * cameraFov;
 
 
@@ -70,16 +80,12 @@ void main()
         return;
     }
 
-    // Sample spatiotemporal blue noise:
-    //ivec2 stbnUV = (uv + ivec2(int(pc.FrameNo) / 64, int(pc.FrameNo) / 8192)) & 127;
-    //ivec2 stbnUV = (ivec2(uv * pc.Resolution.xy)) & 127;
     ivec2 stbnUV = ivec2(uv * pc.Resolution.xy);
     stbnUV += ivec2(int(pc.FrameNo) / 64, int(pc.FrameNo) / 8192);
     stbnUV &= 127;
     stbnUV += ivec2(0, 128 * int(pc.FrameNo & 63));
 
-    hash_seed kernel = hash_seed(initHashSeed(uvec2(v_FragPos * pc.Resolution)), uint(pc.FrameNo));
-    vec3 noise = hash3(kernel, PRNG_FILTER);
+    vec3 noise = GetNoise();
 
     // Global illumination:
     vec4 irradiance = vec4(0.0);
@@ -90,11 +96,6 @@ void main()
         vec3 tangent = vec3(normal.z, normal.x, normal.y);
         vec3 bitangent = cross(normal, tangent);
 
-//        vec2 stbNoise = texelFetch(samplerSTBN, stbnUV, 0).rg;
-//        vec3 localRayDir = SampleHemisphere(stbNoise);      // ray direction in Z+ hemisphere
-
-        //float seed = uintBitsToFloat(0x3f800000 + ((pc.FrameNo % 32768u) << 8u)) - 1.0;
-        //vec2 noise = vec2(GoldNoise(uv * pc.Resolution.xy, seed + 0.1), GoldNoise(uv * pc.Resolution.xy, seed + 0.2));
         vec3 localRayDir = SampleHemisphere(noise.xy);      // ray direction in Z+ hemisphere
 
         vec3 rayDir = normalize(tangent * localRayDir.x + bitangent * localRayDir.y + normal * localRayDir.z);
@@ -126,12 +127,14 @@ void main()
             }
             else
             {
+                vec3 lightColor = vec3(u_Palette[material].color) / 255.0;
+
                 float voxelDistance = distance(vec3(voxelPos), vec3(hitVoxelPos));
-                float attenuation = max(1.0 - exp(-voxelDistance / 512.0), 0.01);
+                float attenuation = max(1.0 - exp(-voxelDistance * pc.AmbientFalloff), pc.AmbientMinimum);
 
                 float sunAttenuation = exp(-voxelDistance / 64.0);
 
-                irradiance = vec4(attenuation * pc.AmbientLight.rgb + sunAttenuation * pc.SunLight.rgb/* * dot(pc.SunDir.xyz, hitNormal)*/ * hitSunLight, 1.0);
+                irradiance = vec4(attenuation * pc.AmbientLight.rgb + sunAttenuation * lightColor * pc.SunLight.rgb/* * dot(pc.SunDir.xyz, hitNormal)*/ * hitSunLight, 1.0);
             } 
         }
         else
@@ -152,13 +155,10 @@ void main()
     uint voxelFace = GetVoxelFaceKey(voxelPtr, normal);
     VHM_AddSample(pc.CurrentVHM, voxelFace, irradiance, irradiance.w * sunLight, pc.FrameNo);
 
-    // Get the number of radiance samples for the current pixel
-    //float numRadianceSamples = VHM_QuickLookup(pc.PrevVHM, voxelFace).w;
-
     // Write output attachments:
     Voxel = uvec4(voxelPos, voxelPtr);
     Normal = vec4(0.5 * (normal + 1.0), 1.0);
-    Radiance = vec4(lightRadiance.rgb, 1.0);
+    Radiance = vec4(irradiance.rgb, 1.0);
 }
 
 
@@ -222,25 +222,3 @@ float CastSunRay(vec3 startPos, vec3 normal, vec2 uv)
     }
     return 0.0f;
 }
-
-/*
-float CastSunRay(vec3 startPos, vec3 normal, vec2 uv)
-{
-    float sunIntensity = dot(pc.SunDir.xyz, normal);
-
-    if (sunIntensity > 0.0) // sunIntensity >= 0.01
-    {
-        vec3 rayPos = startPos + 0.046875 * normal;
-
-        uvec3 hitVoxelPos;
-        uint hitVoxelPtr;
-        vec3 hitNormal;
-        vec3 hitPos;
-        if (!RayTrace(pc.VoxelMap, rayPos, pc.SunDir.xyz, hitVoxelPos, hitVoxelPtr, hitNormal, hitPos))
-        {
-            return sunIntensity;    // Ray has reached the sun
-        }
-    }
-    return 0.0f;
-}
-*/

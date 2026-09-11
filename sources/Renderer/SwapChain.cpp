@@ -5,15 +5,16 @@
 
 
 SwapChain::SwapChain(RenderDevice& device)
-    : m_device(device), m_frameIndex(0), m_imageIndex(0)
+    : m_device(device), m_frameIndex(0), m_imageIndex(0), m_vsync(false)
 {
 
 }
 
 
-void SwapChain::Init(struct GLFWwindow* window, uint32_t maxFramesInFlight)
+void SwapChain::Init(struct GLFWwindow* window, uint32_t maxFramesInFlight, bool vsync)
 {
     m_window = window;
+    m_vsync = vsync;
 
     /* Create command buffers */
     std::vector<VkCommandBuffer> cmdBuffers(maxFramesInFlight);
@@ -43,6 +44,7 @@ void SwapChain::Init(struct GLFWwindow* window, uint32_t maxFramesInFlight)
 
 void SwapChain::Recreate()
 {
+    m_suboptimal = false;
     if (m_handle)
     {
         /* Wait for all outstanding queue operations to complete */
@@ -100,16 +102,19 @@ void SwapChain::Recreate()
                     m_format = surfaceFormat.format;
             }
         }
-        m_format = VK_FORMAT_B8G8R8A8_UNORM;
+        //m_format = VK_FORMAT_B8G8R8A8_UNORM;
 
         /* Choose present mode */
         VkPresentModeKHR presentMode = VK_PRESENT_MODE_FIFO_KHR;
-        for (auto mode : presentModes)
+        if (!m_vsync)
         {
-            if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
+            for (auto mode : presentModes)
             {
-                presentMode = mode; 
-                break;
+                if (mode == VK_PRESENT_MODE_MAILBOX_KHR)
+                {
+                    presentMode = mode; 
+                    break;
+                }
             }
         }
 
@@ -205,9 +210,10 @@ Image* SwapChain::AcquireImage(CommandBuffer *cmdBuffer)
             Recreate();
             return AcquireImage(cmdBuffer);
         }
-        else if (result == VK_SUBOPTIMAL_KHR)
+        else if (result == VK_SUBOPTIMAL_KHR && !m_suboptimal)
         {
             LOG_WARNING("Suboptimal swap chain");
+            m_suboptimal = true;
         }
         else if (result != VK_SUCCESS)
         {

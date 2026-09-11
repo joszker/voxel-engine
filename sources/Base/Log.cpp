@@ -100,6 +100,7 @@ void Logger::Emit(int level, std::string filePath, unsigned line)
     std::tm dateTime = *std::localtime(&timeNow);
     char timeStr[32];
 
+    m_mutex.lock();
     for (Sink& sink : m_sinks)
     {
         if (level >= sink.level)
@@ -124,6 +125,7 @@ void Logger::Emit(int level, std::string filePath, unsigned line)
                 sink.stream->flush();
         }
     }
+    m_mutex.unlock();
 }
 
 void Logger::SetLevel(int level)

@@ -1,11 +1,11 @@
-#include "RayTrace.h"
+#include "SVRayCast.h"
 #include "SVTree.h"
 
 
 
 
 
-RayTraceResult RayTrace(const SVTree& tree, Vec3 rayOrigin, Vec3 rayDir)
+RayTraceResult RayCast(const SVTree& tree, Vec3 rayOrigin, Vec3 rayDir)
 {
     const float kTreeScale = 1.0 * float(pow4(tree.GetDepth()));
     rayOrigin = rayOrigin / kTreeScale + 1.0f;

@@ -62,7 +62,6 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         dumInfo.pUserData = this;
 
         VkInstanceCreateInfo info = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
-        info.pNext = &dumInfo;
         info.pApplicationInfo = &appInfo;
         info.enabledExtensionCount = extensions.size();
         info.ppEnabledExtensionNames = extensions.data();
@@ -112,7 +111,8 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         VkPhysicalDeviceProperties props;
         vkGetPhysicalDeviceProperties(m_adapter, &props);
 
-        LOG_INFO("Device Name: {}", props.deviceName); 
+        LOG_INFO("Device Name: {}", props.deviceName);
+        m_debug.deviceName = props.deviceName;
     }
 
     /* Choose device queue families */
@@ -251,9 +251,6 @@ bool RenderDevice::Init(struct GLFWwindow* window, bool debug)
         vkGetDeviceQueue(m_device, m_presentQueueFamily, 0, &m_presentQueue);
         vkGetDeviceQueue(m_device, m_transferQueueFamily, 0, &m_transferQueue);
     }
-
-    LOG_INFO("Graphics Queue = {}", (void*)m_graphicsQueue);
-    LOG_INFO(" Present Queue = {}", (void*)m_presentQueue);
 
 
     /* Create memory allocator */
