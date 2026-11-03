@@ -42,8 +42,7 @@ layout(push_constant, std430) uniform PushConstants
 layout(binding = 0) uniform usampler2D samplerVoxel;
 layout(binding = 1) uniform sampler2D samplerNormal;
 layout(binding = 2) uniform sampler2D samplerSTBN;
-layout(binding = 3) uniform sampler2D samplerRadiance;
-layout(binding = 4) uniform sampler2D samplerSpecularSun;
+layout(binding = 3) uniform sampler2D samplerSpecular;
 
 
 layout (binding = 5) uniform Palette

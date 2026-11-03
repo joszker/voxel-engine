@@ -214,7 +214,7 @@ void MainScene::OnUpdate(f32 dt)
             m_fpsHistory.push_back(m_fps);
     }
 
-    if (m_playingInput)
+    if (m_playingInput) // Replay inputs:
     {
         f64 elapsed = currentTime - m_inputStartTime;
         f64 index = elapsed * INPUT_RECORDING_RATE;
@@ -259,6 +259,7 @@ void MainScene::OnUpdate(f32 dt)
 
     if (!m_playingInput)
     {
+        // Handle user camera controls:
         float forward = 0, right = 0, upward = 0;
 
         if (m_camera.active)
@@ -337,24 +338,6 @@ void MainScene::OnRender(Image& image, CommandBuffer& cmdBuffer, f32 alpha)
 
     m_renderer.Render(image, cmdBuffer);
     m_fpsCounter += 1;
-    
-/*
-    auto swapChain = m_app->GetSwapChain();
-
-    RenderPass renderPass = {
-        .Area = swapChain.GetArea(),
-        .Attachments = {{
-            .Image = &image,
-            .ClearValue = { VkClearColorValue{ 0.5f, 0.0f, 0.5f, 1.0f } },
-        }}
-    };
-
-    cmdBuffer.BeginRenderPass(renderPass);
-
-    ImGuiLayer::Draw(cmdBuffer);
-
-    cmdBuffer.EndRenderPass();*/
-
 }
 
 
@@ -586,8 +569,8 @@ void MainScene::renderGui()
 
         ImGui::SeparatorText("Sun");
         changed |= ImGui::ColorEdit3("Sun light", &m_renderParams.SunLight[0], ImGuiColorEditFlags_DisplayHSV);
-        changed |= ImGui::SliderAngle("Sun elevation", &m_renderParams.SunElevationAngle, 0.0f, 90.0f);
-        changed |= ImGui::SliderAngle("Sun azimuth", &m_renderParams.SunAzimuthAngle, 90.0f, 270.0f);
+        refresh |= ImGui::SliderAngle("Sun elevation", &m_renderParams.SunElevationAngle, 0.0f, 90.0f);
+        refresh |= ImGui::SliderAngle("Sun azimuth", &m_renderParams.SunAzimuthAngle, 90.0f, 270.0f);
         changed |= ImGui::SliderAngle("Sun cone", &m_renderParams.SunConeAngle, 0.0f, 12.0f);
 
         ImGui::End();
@@ -908,7 +891,7 @@ void MainScene::loadModel(std::string path, VoxelArray* model)
 
         size_t minIndex = std::min_element(colorDist.begin(), colorDist.end()) - colorDist.begin();
 
-        LOG_TRACE("{} --> {}", index, minIndex);
+        //LOG_TRACE("{} --> {}", index, minIndex);
 
         for (size_t i = 0; i < model->Data.size(); i++)
         {

@@ -49,8 +49,7 @@ static_assert(sizeof(PushConstants) <= 256);
 #define BIND_IMAGE_VOXEL        0
 #define BIND_IMAGE_NORMAL       1
 #define BIND_IMAGE_STBN         2
-#define BIND_IMAGE_RADIANCE     3
-#define BIND_IMAGE_SPECULAR     4
+#define BIND_IMAGE_SPECULAR     3
 #define BIND_BUFFER_PALETTE     5
 
 /* Voxel hash map */
@@ -102,7 +101,6 @@ void VoxelRenderer::Initialize(RenderDevice* device, SwapChain *swapChain, bool 
         layoutBuilder.Add(BIND_IMAGE_VOXEL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(BIND_IMAGE_NORMAL, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(BIND_IMAGE_STBN, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
-        layoutBuilder.Add(BIND_IMAGE_RADIANCE, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(BIND_IMAGE_SPECULAR, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
         layoutBuilder.Add(BIND_BUFFER_PALETTE, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
 
@@ -370,7 +368,7 @@ void VoxelRenderer::Render(Image& dstImage, CommandBuffer& cmdBuffer)
         {;
             writer.Write(BIND_IMAGE_VOXEL, frame.voxelImage, m_imageSampler);
             writer.Write(BIND_IMAGE_NORMAL, frame.normalImage, m_imageSampler);
-            writer.Write(BIND_IMAGE_RADIANCE, frame.specularImage, m_imageSampler);
+            writer.Write(BIND_IMAGE_SPECULAR, frame.specularImage, m_imageSampler);
             writer.Write(BIND_BUFFER_PALETTE, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, m_paletteBuffer);
         }
         writer.Update(*m_device);

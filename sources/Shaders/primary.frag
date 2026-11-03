@@ -80,11 +80,6 @@ void main()
         return;
     }
 
-    ivec2 stbnUV = ivec2(uv * pc.Resolution.xy);
-    stbnUV += ivec2(int(pc.FrameNo) / 64, int(pc.FrameNo) / 8192);
-    stbnUV &= 127;
-    stbnUV += ivec2(0, 128 * int(pc.FrameNo & 63));
-
     vec3 noise = GetNoise();
 
     // Global illumination:

@@ -32,12 +32,17 @@ set(sources
     ${SOURCE_DIR}/Base/Log.cpp
     ${SOURCE_DIR}/Demo/Application.h
     ${SOURCE_DIR}/Demo/Application.cpp
+    ${SOURCE_DIR}/Demo/ImGuiLayer.h
+    ${SOURCE_DIR}/Demo/ImGuiLayer.cpp
     ${SOURCE_DIR}/Demo/Scene.h
     ${SOURCE_DIR}/Demo/Scene.cpp
     ${SOURCE_DIR}/Demo/MainScene.h
     ${SOURCE_DIR}/Demo/MainScene.cpp
+    ${SOURCE_DIR}/Demo/MenuScene.h
+    ${SOURCE_DIR}/Demo/MenuScene.cpp
     ${SOURCE_DIR}/Demo/imgfx.h
     ${SOURCE_DIR}/Demo/imgfx.cpp
+    ${SOURCE_DIR}/Renderer/Vulkan.h
     ${SOURCE_DIR}/Renderer/RenderDevice.h
     ${SOURCE_DIR}/Renderer/RenderDevice.cpp
     ${SOURCE_DIR}/Renderer/SwapChain.h
@@ -58,8 +63,10 @@ set(sources
     ${SOURCE_DIR}/Voxel/SVBuilder.cpp
     ${SOURCE_DIR}/Voxel/VoxLoader.h
     ${SOURCE_DIR}/Voxel/VoxLoader.cpp
-    ${SOURCE_DIR}/Voxel/RayTrace.h
-    ${SOURCE_DIR}/Voxel/RayTrace.cpp
+    ${SOURCE_DIR}/Voxel/SVRayCast.h
+    ${SOURCE_DIR}/Voxel/SVRayCast.cpp
+    ${SOURCE_DIR}/Voxel/VoxelRenderer.h
+    ${SOURCE_DIR}/Voxel/VoxelRenderer.cpp
 )
 
 
@@ -91,6 +98,18 @@ file(GLOB SHADER_FILES ${SHADER_DIR}/*.vert ${SHADER_DIR}/*.frag ${SHADER_DIR}/*
 set(SHADER_OUTPUT_DIR "${DATA_DIR}/shaders")
 set(SHADER_OUTPUT_FILES "")
 
+find_program(SPIRV_OPT_EXECUTABLE
+    NAMES spirv-opt
+    HINTS
+        "${Vulkan_INCLUDE_DIRS}/../Bin"
+)
+
+if(NOT SPIRV_OPT_EXECUTABLE)
+    message(FATAL_ERROR "spirv-opt not found")
+else()
+    message(STATUS "spirv-opt: ${SPIRV_OPT_EXECUTABLE}")
+endif()
+
 foreach(SHADER_INPUT_FILE IN LISTS SHADER_FILES)
     get_filename_component(FILE_NAME ${SHADER_INPUT_FILE} NAME)
     set(SHADER_OUTPUT_FILE "${SHADER_OUTPUT_DIR}/${FILE_NAME}.spv")
@@ -99,6 +118,7 @@ foreach(SHADER_INPUT_FILE IN LISTS SHADER_FILES)
         OUTPUT  ${SHADER_OUTPUT_FILE}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${SHADER_OUTPUT_DIR}
         COMMAND ${Vulkan_GLSLANG_VALIDATOR_EXECUTABLE} -V ${SHADER_INPUT_FILE} -o ${SHADER_OUTPUT_FILE}
+        COMMAND ${SPIRV_OPT_EXECUTABLE} -O ${SHADER_OUTPUT_FILE} -o ${SHADER_OUTPUT_FILE}
         DEPENDS ${SHADER_INPUT_FILE}
         COMMENT "Compiling shader: ${FILE_NAME}"
         VERBATIM

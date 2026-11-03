@@ -48,7 +48,7 @@ void main()
     if (pc.Debug == 1)
         color = mix(diffuse, baseColor * material.emission, float(material.emission != 0.0f));
     else if (pc.Debug == 2)
-        color = texelFetch(samplerRadiance, uv, 0).rgb;
+        color = texelFetch(samplerSpecular, uv, 0).rgb;
     else if (pc.Debug == 3)
         color = unpackUnorm4x8(voxelPtr).rgb;
     else if (pc.Debug == 4)

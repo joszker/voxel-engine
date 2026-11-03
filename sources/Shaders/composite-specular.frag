@@ -34,7 +34,7 @@ void main()
     VHData voxelValue = VHM_Lookup(pc.CurrentVHM, voxelFace);
     vec3 irradiance = voxelValue.radiance.rgb / voxelValue.radiance.w;
     float sunLight = voxelValue.sun / voxelValue.radiance.w;
-    vec3 specular = texelFetch(samplerRadiance, uv, 0).rgb;
+    vec3 specular = texelFetch(samplerSpecular, uv, 0).rgb;
 
     vec3 diffuse = irradiance;
     diffuse += sunLight * pc.SunLight.rgb;//GetSunLight(voxelPos, normal);
@@ -54,7 +54,7 @@ void main()
     if (pc.Debug == 1)
         color = mix(diffuse, baseColor * material.emission, float(material.emission != 0.0f));
     else if (pc.Debug == 2)
-        color = texelFetch(samplerRadiance, uv, 0).rgb;
+        color = texelFetch(samplerSpecular, uv, 0).rgb;
     else if (pc.Debug == 3)
         color = unpackUnorm4x8(voxelPtr).rgb;
     else if (pc.Debug == 4)
